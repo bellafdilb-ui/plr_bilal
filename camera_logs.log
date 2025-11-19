@@ -1,0 +1,75 @@
+2025-11-19 15:40:42,804 - INFO - Caméra 0 ouverte (1280x720).
+2025-11-19 15:41:05,145 - INFO - Enregistrement démarré : output\recording_20251119_154105.avi
+2025-11-19 15:41:11,647 - INFO - Enregistrement arrêté.
+2025-11-19 15:41:14,017 - INFO - Caméra libérée.
+2025-11-19 15:41:14,039 - INFO - Programme terminé.
+2025-11-19 15:44:35,147 - INFO - Caméra ouverte (résolution: 1920x1080, FPS cible: 60, FPS réel: 60.00).
+2025-11-19 15:45:36,313 - INFO - Caméra libérée.
+2025-11-19 15:45:36,332 - INFO - Programme terminé.
+2025-11-19 15:52:19,231 - INFO - Caméra ouverte (résolution: 1280x720, FPS cible: 60, FPS réel: 60.00).
+2025-11-19 15:52:37,559 - INFO - Caméra libérée.
+2025-11-19 15:52:37,581 - INFO - Programme terminé.
+2025-11-19 15:52:58,152 - INFO - Caméra configurée - Résolution demandée: 1280x720 @ 60 FPS | Résolution réelle: 1280x720 @ 60.00 FPS
+2025-11-19 15:53:00,234 - INFO - FPS réels : 9.14
+2025-11-19 15:53:02,239 - INFO - FPS réels : 9.97
+2025-11-19 15:53:04,256 - INFO - FPS réels : 9.92
+2025-11-19 15:53:06,268 - INFO - FPS réels : 9.94
+2025-11-19 15:53:08,270 - INFO - FPS réels : 10.00
+2025-11-19 15:53:10,281 - INFO - FPS réels : 9.95
+2025-11-19 15:53:12,300 - INFO - FPS réels : 9.91
+2025-11-19 15:53:14,303 - INFO - FPS réels : 9.98
+2025-11-19 15:53:16,320 - INFO - FPS réels : 9.92
+2025-11-19 15:53:18,334 - INFO - FPS réels : 9.93
+2025-11-19 15:53:20,351 - INFO - FPS réels : 9.92
+2025-11-19 15:53:22,461 - INFO - FPS réels : 9.95
+2025-11-19 15:53:24,560 - INFO - FPS réels : 10.01
+2025-11-19 15:53:26,574 - INFO - FPS réels : 9.93
+2025-11-19 15:53:28,346 - INFO - Caméra libérée.
+2025-11-19 15:53:28,363 - INFO - Programme terminé.
+2025-11-19 15:58:46,958 - ERROR - Exception : unsupported operand type(s) for >>: 'float' and 'int'
+2025-11-19 15:58:46,959 - ERROR - Échec de l'initialisation de la caméra. Vérifiez :
+2025-11-19 15:58:46,959 - ERROR - 1. La caméra est-elle déjà utilisée par une autre application ?
+2025-11-19 15:58:46,959 - ERROR - 2. Le format MJPG est-il supporté ? (essayez 'YUY2' ou 'NV12')
+2025-11-19 16:00:49,698 - INFO - Format MJPG supporté et activé.
+2025-11-19 16:00:52,466 - INFO - Caméra configurée - Format: N/A (non supporté) | Résolution: 1280x720 | FPS: 60.00 (cible: 60)
+2025-11-19 16:00:53,539 - INFO - FPS réels : 8.40 (cible: 60)
+2025-11-19 16:00:54,549 - INFO - FPS réels : 9.91 (cible: 60)
+2025-11-19 16:00:55,558 - INFO - FPS réels : 9.91 (cible: 60)
+2025-11-19 16:00:56,664 - INFO - FPS réels : 9.96 (cible: 60)
+2025-11-19 16:00:57,767 - INFO - FPS réels : 9.98 (cible: 60)
+2025-11-19 16:00:58,774 - INFO - FPS réels : 9.93 (cible: 60)
+2025-11-19 16:00:59,873 - INFO - FPS réels : 10.02 (cible: 60)
+2025-11-19 16:01:00,880 - INFO - FPS réels : 9.93 (cible: 60)
+2025-11-19 16:01:01,987 - INFO - FPS réels : 9.95 (cible: 60)
+2025-11-19 16:01:02,998 - INFO - FPS réels : 9.89 (cible: 60)
+2025-11-19 16:01:04,104 - INFO - FPS réels : 9.96 (cible: 60)
+2025-11-19 16:01:05,118 - INFO - FPS réels : 9.86 (cible: 60)
+2025-11-19 16:01:06,213 - INFO - FPS réels : 10.06 (cible: 60)
+2025-11-19 16:01:07,318 - INFO - FPS réels : 9.96 (cible: 60)
+2025-11-19 16:01:08,327 - INFO - FPS réels : 9.92 (cible: 60)
+2025-11-19 16:01:09,433 - INFO - FPS réels : 9.97 (cible: 60)
+2025-11-19 16:01:10,436 - INFO - FPS réels : 9.96 (cible: 60)
+2025-11-19 16:01:11,543 - INFO - FPS réels : 9.94 (cible: 60)
+2025-11-19 16:01:12,549 - INFO - FPS réels : 9.95 (cible: 60)
+2025-11-19 16:01:13,649 - INFO - FPS réels : 10.00 (cible: 60)
+2025-11-19 16:01:14,660 - INFO - FPS réels : 9.89 (cible: 60)
+2025-11-19 16:01:15,770 - INFO - FPS réels : 9.91 (cible: 60)
+2025-11-19 16:01:16,775 - INFO - FPS réels : 9.96 (cible: 60)
+2025-11-19 16:01:17,875 - INFO - FPS réels : 10.00 (cible: 60)
+2025-11-19 16:01:18,986 - INFO - FPS réels : 9.90 (cible: 60)
+2025-11-19 16:01:19,990 - INFO - FPS réels : 9.97 (cible: 60)
+2025-11-19 16:01:21,090 - INFO - FPS réels : 10.00 (cible: 60)
+2025-11-19 16:01:22,101 - INFO - FPS réels : 9.90 (cible: 60)
+2025-11-19 16:01:23,204 - INFO - FPS réels : 9.98 (cible: 60)
+2025-11-19 16:01:24,210 - INFO - FPS réels : 9.94 (cible: 60)
+2025-11-19 16:01:25,316 - INFO - FPS réels : 9.96 (cible: 60)
+2025-11-19 16:01:26,179 - INFO - Caméra libérée.
+2025-11-19 16:01:26,191 - INFO - Programme terminé.
+2025-11-19 16:01:59,845 - INFO - Format MJPG supporté et activé.
+2025-11-19 16:02:02,613 - INFO - Caméra configurée - Format: N/A (non supporté) | Résolution: 1280x720 | FPS: 60.00 (cible: 60)
+2025-11-19 16:02:03,692 - INFO - FPS réels : 8.35 (cible: 60)
+2025-11-19 16:02:04,702 - INFO - FPS réels : 9.91 (cible: 60)
+2025-11-19 16:02:05,052 - INFO - Caméra libérée.
+2025-11-19 16:02:05,075 - INFO - Programme terminé.
+2025-11-19 16:28:40,986 - ERROR - Erreur dans capture_thread: [Errno 22] Invalid argument: 'video=HD USB Camera'
+2025-11-19 16:32:42,094 - ERROR - Erreur dans capture_thread: [Errno 22] Invalid argument: 'video=HD USB Camera'
