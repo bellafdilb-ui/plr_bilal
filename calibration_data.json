@@ -1,0 +1,19 @@
+{
+  "calibrations": [
+    {
+      "timestamp": "2025-11-24T16:40:12.512816",
+      "ratio_mm_per_px": 0.563685757923918,
+      "reference_mm": 300.0,
+      "distance_px": 532.2114241539729,
+      "camera_id": 0
+    },
+    {
+      "timestamp": "2025-11-24T17:10:36.127607",
+      "ratio_mm_per_px": 0.17005597718591361,
+      "reference_mm": 100.0,
+      "distance_px": 588.0416651904864,
+      "camera_id": 0
+    }
+  ],
+  "active_calibration": 1
+}
