@@ -1,0 +1,35 @@
+{
+    "camera": {
+        "index": 0,
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "exposure": -6,
+        "gain": 0,
+        "auto_exposure": true
+    },
+    "detection": {
+        "canny_threshold1": 50,
+        "canny_threshold2": 150,
+        "min_radius": 20,
+        "max_radius": 100,
+        "dp": 1.2,
+        "min_dist": 50,
+        "param1": 50,
+        "param2": 30,
+        "morphology_kernel_size": 5,
+        "gaussian_blur": 5
+    },
+    "recording": {
+        "save_path": "recordings",
+        "image_format": "png",
+        "auto_save": true,
+        "max_duration": 300
+    },
+    "advanced": {
+        "log_level": "INFO",
+        "enable_performance_monitor": false,
+        "show_debug_overlay": false,
+        "thread_priority": "normal"
+    }
+}

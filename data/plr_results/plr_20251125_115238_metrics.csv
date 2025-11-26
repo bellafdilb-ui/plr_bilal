@@ -1,0 +1,8 @@
+metric,value
+baseline_diameter_mm,7.48
+min_diameter_mm,6.84
+amplitude_percent,8.6
+latency_ms,4108.0
+recovery_75_s,1.06
+total_measures,426
+mean_confidence,64.8

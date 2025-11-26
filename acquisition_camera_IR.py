@@ -31,6 +31,7 @@ class PupilDetectorIR:
         # Chemins
         self.project_root = Path(__file__).parent
         self.config_file = self.project_root / "shared_params.json"
+        self.calibration_file = self.project_root / "calibration_data.json"
         self.data_folder = self.project_root / "data"
         self.data_folder.mkdir(exist_ok=True)
         
@@ -55,7 +56,15 @@ class PupilDetectorIR:
         self.roi_width = 240
         self.roi_height = 180
         self.view_mode = 1
-        self.ratio_mm_per_px = None  # Ratio de calibration
+        self.ratio_mm_per_px = self.load_calibration()  # ✅ Charge au démarrage
+
+        # Affiche l'état
+        if self.ratio_mm_per_px:
+            print(f"📏 Calibration chargée : {self.ratio_mm_per_px:.4f} mm/px")
+        else:
+            print("⚠️ Calibration non disponible (mode pixels uniquement)")
+
+
         
         # État
         self.recording = False
@@ -103,6 +112,16 @@ class PupilDetectorIR:
                     self.shutdown = params.get("shutdown", self.shutdown)
                     self.ratio_mm_per_px = params.get("ratio_mm_per_px", self.ratio_mm_per_px)
                     
+                    # ✅ AJOUT : Rechargement dynamique calibration
+                    new_ratio = self.load_calibration()
+                    if new_ratio != self.ratio_mm_per_px:
+                        self.ratio_mm_per_px = new_ratio
+                        if new_ratio is not None:
+                            print(f"🔄 Calibration mise à jour : {new_ratio:.4f} mm/px")
+                        else:
+                            print("⚠️ Calibration désactivée")
+
+
                     # Mise à jour exposition caméra si changée
                     # Mise à jour paramètres caméra si changés
                     if self.cap is not None:
@@ -121,6 +140,29 @@ class PupilDetectorIR:
                     
         except Exception as e:
             print(f"⚠️ Erreur chargement paramètres : {e}")
+    
+    def load_calibration(self):
+        """
+        Charge le ratio de calibration depuis calibration_data.json
+        Returns:
+            float ou None: ratio mm/px ou None si pas de calibration
+        """
+        try:
+            if self.calibration_file.exists():
+                with open(self.calibration_file, 'r') as f:
+                    data = json.load(f)
+                    ratio = data.get("ratio_mm_per_px")
+                    
+                    if ratio is not None and ratio > 0:
+                        return float(ratio)
+                    else:
+                        return None
+            else:
+                return None
+                
+        except Exception as e:
+            print(f"⚠️ Erreur chargement calibration : {e}")
+            return None
     
     
     def init_camera(self):
@@ -197,25 +239,180 @@ class PupilDetectorIR:
                 best_score = score
                 best_contour = contour
         
-        # 6. Ajustement ellipse
+        # 6. Ajustement ellipse + Confidence Score
         if best_contour is not None and len(best_contour) >= 5:
             try:
                 ellipse = cv2.fitEllipse(best_contour)
                 (center_x, center_y), (width, height), angle = ellipse
-                
+
                 diameter = (width + height) / 2
                 diameter_mm = px_to_mm(diameter, self.ratio_mm_per_px)
+
+                # ═══════════════════════════════════════════════════
+                # CALCUL CONFIDENCE SCORE AMÉLIORÉ (0-100%)
+                # ═══════════════════════════════════════════════════
+                confidence = 0.0
                 
-                confidence = best_score
+                # ─── Composante 1 : Circularité (40%) ───
+                perimeter = cv2.arcLength(best_contour, True)
+                if perimeter > 0:
+                    circularity = 4 * np.pi * cv2.contourArea(best_contour) / (perimeter ** 2)
+                    confidence += min(circularity, 1.0) * 40
                 
+                # ─── Composante 2 : Contraste iris/pupille (30%) ───
+                try:
+                    # Masque de la pupille
+                    mask_pupil = np.zeros(gray.shape, dtype=np.uint8)
+                    cv2.drawContours(mask_pupil, [best_contour], -1, 255, -1)
+                    
+                    # Intensité moyenne pupille
+                    pupil_mean = cv2.mean(gray, mask=mask_pupil)[0]
+                    
+                    # Masque de l'iris (anneau autour de la pupille)
+                    kernel = np.ones((15, 15), np.uint8)
+                    mask_dilated = cv2.dilate(mask_pupil, kernel, iterations=2)
+                    mask_iris = cv2.subtract(mask_dilated, mask_pupil)
+                    iris_mean = cv2.mean(gray, mask=mask_iris)[0]
+                    
+                    # Score de contraste (plus le contraste est fort, mieux c'est)
+                    if iris_mean > 0 and pupil_mean < iris_mean:
+                        contrast_ratio = (iris_mean - pupil_mean) / iris_mean
+                        confidence += min(contrast_ratio, 1.0) * 30
+                    
+                except Exception:
+                    pass  # Si erreur, on ignore cette composante
+                
+                # ─── Composante 3 : Taille réaliste (20%) ───
+                # Pupille humaine typique : 2-8mm → 40-160px à 0.05mm/px
+                radius = diameter / 2
+                if 30 < radius < 200:
+                    confidence += 20
+                elif 20 < radius < 250:
+                    confidence += 10  # Acceptable mais limite
+                
+                # ─── Composante 4 : Uniformité interne (10%) ───
+                try:
+                    pupil_pixels = gray[mask_pupil == 255]
+                    if len(pupil_pixels) > 10:  # Suffisamment de pixels
+                        std_dev = np.std(pupil_pixels)
+                        # Faible écart-type = bonne uniformité
+                        uniformity = max(0, 1 - std_dev / 50)
+                        confidence += uniformity * 10
+                except Exception:
+                    pass
+                
+                # ─── Score final (plafonné à 100%) ───
+                confidence = min(confidence, 100.0)
+                
+                # ═══════════════════════════════════════════════════
+                # RETOUR
+                # ═══════════════════════════════════════════════════
                 return center_x, center_y, diameter, diameter_mm, confidence
-            
-            except cv2.error:
+
+            except cv2.error as e:
+                if self.debug_mode:
+                    print(f"⚠️ Erreur fitEllipse : {e}")
                 pass
-        
+
+        # Aucune détection valide
         return None, None, None, None, 0.0
+
     
+    def calculate_confidence_score(self, contour, frame_gray):
+        """
+        Calcule le score de confiance de la détection (0-100%)
+        
+        Args:
+            contour: Contour détecté de la pupille
+            frame_gray: Image en niveaux de gris
+            
+        Returns:
+            float: Score de confiance (0-100)
+        """
+        try:
+            score = 0.0
+            weights = []
+            
+            # ══════════════════════════════════════════════════════
+            # CRITÈRE 1 : CIRCULARITÉ (40% du score)
+            # ══════════════════════════════════════════════════════
+            area = cv2.contourArea(contour)
+            perimeter = cv2.arcLength(contour, True)
+            
+            if perimeter > 0:
+                circularity = 4 * np.pi * area / (perimeter ** 2)
+                # Score max si circularité = 1.0 (cercle parfait)
+                circularity_score = min(circularity, 1.0) * 40
+                score += circularity_score
+                weights.append(("Circularité", circularity_score, 40))
+            
+            # ══════════════════════════════════════════════════════
+            # CRITÈRE 2 : CONTRASTE IRIS/PUPILLE (30% du score)
+            # ══════════════════════════════════════════════════════
+            mask = np.zeros(frame_gray.shape, dtype=np.uint8)
+            cv2.drawContours(mask, [contour], -1, 255, -1)
+            
+            # Intensité moyenne dans la pupille
+            pupil_mean = cv2.mean(frame_gray, mask=mask)[0]
+            
+            # Intensité moyenne dans l'iris (anneau autour pupille)
+            kernel = np.ones((15, 15), np.uint8)
+            dilated_mask = cv2.dilate(mask, kernel, iterations=2)
+            iris_mask = cv2.subtract(dilated_mask, mask)
+            iris_mean = cv2.mean(frame_gray, mask=iris_mask)[0]
+            
+            if iris_mean > 0:
+                contrast = abs(iris_mean - pupil_mean) / iris_mean
+                contrast_score = min(contrast, 1.0) * 30
+                score += contrast_score
+                weights.append(("Contraste", contrast_score, 30))
+            
+            # ══════════════════════════════════════════════════════
+            # CRITÈRE 3 : TAILLE RAISONNABLE (20% du score)
+            # ══════════════════════════════════════════════════════
+            # Pupille humaine : 2-8mm → environ 40-160 px à 0.05mm/px
+            (x, y), radius = cv2.minEnclosingCircle(contour)
+            
+            if 30 < radius < 200:  # Plage réaliste en pixels
+                size_score = 20
+            elif 20 < radius < 250:
+                size_score = 10  # Taille limite acceptable
+            else:
+                size_score = 0  # Taille aberrante
+                
+            score += size_score
+            weights.append(("Taille", size_score, 20))
+            
+            # ══════════════════════════════════════════════════════
+            # CRITÈRE 4 : UNIFORMITÉ INTERNE (10% du score)
+            # ══════════════════════════════════════════════════════
+            pupil_pixels = frame_gray[mask == 255]
+            if len(pupil_pixels) > 0:
+                std_dev = np.std(pupil_pixels)
+                # Faible écart-type = pupille uniforme
+                uniformity = max(0, 1 - std_dev / 50)  # Normalisation
+                uniformity_score = uniformity * 10
+                score += uniformity_score
+                weights.append(("Uniformité", uniformity_score, 10))
+            
+            # ══════════════════════════════════════════════════════
+            # SCORE FINAL
+            # ══════════════════════════════════════════════════════
+            final_score = min(score, 100.0)  # Plafonnement à 100%
+            
+            # Log détaillé (debug)
+            if self.debug_mode:
+                print(f"\n📊 Détail Confidence Score : {final_score:.1f}%")
+                for name, value, max_val in weights:
+                    print(f"   {name}: {value:.1f}/{max_val}")
+            
+            return final_score
+            
+        except Exception as e:
+            print(f"⚠️ Erreur calcul confidence : {e}")
+            return 0.0
     
+
     def start_recording(self):
         """Démarre l'enregistrement CSV"""
         if self.csv_file is not None:

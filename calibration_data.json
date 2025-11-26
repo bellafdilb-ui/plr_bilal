@@ -13,7 +13,15 @@
       "reference_mm": 100.0,
       "distance_px": 588.0416651904864,
       "camera_id": 0
+    },
+    {
+      "timestamp": "2025-11-25T10:59:44.703649",
+      "ratio_mm_per_px": 0.2705,
+      "reference_mm": 100.0,
+      "distance_px": 369.72,
+      "camera_id": 0
     }
   ],
-  "active_calibration": 1
+  "active_calibration": 1,
+  "ratio_mm_per_px": 0.17005597718591361
 }

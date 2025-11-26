@@ -1,0 +1,9 @@
+{
+    "exposure": -2.5071428571428562,
+    "brightness": 128,
+    "contrast": 32,
+    "blur_kernel": 5,
+    "threshold": 50,
+    "min_area": 500,
+    "max_area": 15000
+}

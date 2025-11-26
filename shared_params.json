@@ -1,23 +1,23 @@
 {
-  "timestamp": "2025-11-24T17:10:51.287845",
+  "timestamp": "2025-11-25T15:23:15.168679",
   "params": {
-    "exposure": -5.050359712230216,
+    "exposure": -6.453237410071942,
     "brightness": 137,
     "contrast": 30,
     "blur_kernel": 9,
-    "threshold_value": 6,
+    "threshold_value": 44,
     "morph_kernel": 3,
     "morph_iterations": 1,
     "min_area": 250,
     "max_area": 5000,
-    "min_circularity": 0.6043478260869565,
+    "min_circularity": 0.6071146245059289,
     "roi_x": 200,
     "roi_y": 150,
     "roi_width": 240,
     "roi_height": 180,
-    "view_mode": 1,
+    "view_mode": 3,
     "recording": false,
     "shutdown": false,
-    "ratio_mm_per_px": 0.17005597718591361
+    "ratio_mm_per_px": 1
   }
 }
