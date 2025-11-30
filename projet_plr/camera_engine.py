@@ -168,7 +168,7 @@ class CameraEngine:
     # CONTRÔLE ENREGISTREMENT
     # ===========================
     
-    def start_recording(self, output_file: str):
+    def start_csv_recording(self, output_file: str):
         """
         Active le mode enregistrement (création CSV).
         
@@ -200,7 +200,7 @@ class CameraEngine:
             print(f"❌ Erreur démarrage enregistrement: {e}")
             self.recording_mode = False
     
-    def stop_recording(self):
+    def stop_csv_recording(self):
         """Arrête l'enregistrement et ferme le CSV"""
         if self.csv_file is not None:
             self.csv_file.close()
@@ -340,35 +340,70 @@ class CameraEngine:
     # ENREGISTREMENT VIDÉO
     # ===========================
 
-    def start_recording(self, prefix="recording"):
+    def start_video_recording(self, prefix="recording"):
         """
         Démarre l'enregistrement vidéo.
         
         Args:
-            prefix: Préfixe pour le nom de fichier (ex: "patient001")
-        
+            prefix: Préfixe du nom OU chemin complet (avec/sans extension)
+            
         Returns:
-            str: Nom du fichier (sans chemin complet) ou None si échec
+            str: Nom du fichier créé, ou False si échec
         """
+        # Vérifier que la caméra est prête
+        if not self.is_ready():
+            print("❌ Impossible de démarrer l'enregistrement : caméra non prête")
+            return False
+        
         if self.is_recording:
             print("⚠️ Enregistrement déjà en cours")
-            return None
+            return False
         
-        # Génération du nom de fichier : YYYYMMDD_HHMMSS_prefix.mp4
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{timestamp}_{prefix}.mp4"
-        self.current_video_path = os.path.join(self.output_dir, filename)
+        # ✅ DÉTECTION : Chemin complet ou simple préfixe ?
+        if os.path.isabs(prefix) or os.path.dirname(prefix):
+            # C'est un chemin complet (ex: "C:/temp/video.avi" ou "videos/test.avi")
+            self.current_video_path = prefix
+            
+            # Extraire le dossier et créer si nécessaire
+            output_dir = os.path.dirname(prefix)
+            if output_dir:
+                try:
+                    os.makedirs(output_dir, exist_ok=True)
+                except (OSError, PermissionError) as e:
+                    print(f"❌ Impossible de créer le dossier {output_dir}: {e}")
+                    return False
+        else:
+            # C'est un simple préfixe (ex: "recording")
+            if self.output_dir is None:
+                self.output_dir = "videos"
+            
+            try:
+                os.makedirs(self.output_dir, exist_ok=True)
+            except (OSError, PermissionError) as e:
+                print(f"❌ Impossible de créer le dossier {self.output_dir}: {e}")
+                return False
+            
+            # Générer le nom avec timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{prefix}_{timestamp}.avi"
+            self.current_video_path = os.path.join(self.output_dir, filename)
         
-        # Codec H264 (ou MJPEG si H264 non disponible)
-        fourcc = cv2.VideoWriter_fourcc(*'H264')  # Ou 'mp4v', 'MJPG'
+        # S'assurer que le chemin a l'extension .avi
+        if not self.current_video_path.endswith('.avi'):
+            self.current_video_path += '.avi'
         
-        # Résolution actuelle de la caméra
+        # Obtenir les propriétés de la caméra
         width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0  # Fallback 30 FPS
+        fps = self.cap.get(cv2.CAP_PROP_FPS)
         
-        # Création du VideoWriter
+        if fps <= 0 or fps > 120:
+            fps = 30.0
+        
+        # Codec vidéo
+        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+        
+        # Créer le VideoWriter
         self.video_writer = cv2.VideoWriter(
             self.current_video_path,
             fourcc,
@@ -379,11 +414,30 @@ class CameraEngine:
         if not self.video_writer.isOpened():
             print(f"❌ Échec création VideoWriter: {self.current_video_path}")
             self.video_writer = None
-            return None
+            return False  # ✅ Retourner False au lieu de None
         
         self.is_recording = True
-        print(f"🔴 Enregistrement démarré: {filename}")
+        self.recording_start_time = time.time()
+        
+        # Retourner UNIQUEMENT le nom du fichier (pas le chemin complet)
+        filename = os.path.basename(self.current_video_path)
+        print(f"🔴 Enregistrement vidéo démarré: {filename}")
+        
         return filename
+
+
+
+    def start_recording(self, prefix="recording"):
+        """
+        Alias pour start_video_recording() (compatibilité tests).
+        
+        Args:
+            prefix: Préfixe du nom de fichier
+            
+        Returns:
+            str: Nom du fichier créé
+        """
+        return self.start_video_recording(prefix=prefix)
 
 
     def write_frame(self, frame):
@@ -403,7 +457,7 @@ class CameraEngine:
         return True
 
 
-    def stop_recording(self):
+    def stop_video_recording(self):
         """
         Arrête l'enregistrement vidéo.
         
@@ -414,15 +468,44 @@ class CameraEngine:
             return None
         
         if self.video_writer:
-            self.video_writer.release()
+            self.video_writer.release()  # ✅ Libérer le fichier
             self.video_writer = None
         
         self.is_recording = False
         saved_path = self.current_video_path
         self.current_video_path = None
         
-        print(f"⏹️ Enregistrement arrêté: {os.path.basename(saved_path)}")
-        return saved_path
+        # ✅ VÉRIFIER que le fichier existe réellement
+        if saved_path and os.path.exists(saved_path):
+            print(f"⏹️ Enregistrement vidéo arrêté: {os.path.basename(saved_path)}")
+            return saved_path
+        else:
+            print(f"⚠️ Fichier vidéo non créé: {saved_path}")
+            return None
+
+    def stop_recording(self):
+        """
+        Alias pour stop_video_recording() (compatibilité tests).
+        
+        Returns:
+            str: Chemin du fichier enregistré, ou None si pas d'enregistrement
+        """
+        return self.stop_video_recording()
+
+
+
+    def read(self):
+        """
+        Lit une frame de la caméra (compatible avec les tests).
+
+        Returns:
+            tuple: (success: bool, frame: numpy.ndarray)
+        """
+        if not self.cap or not self.cap.isOpened():
+            return False, None
+        
+        return self.cap.read()
+
 
 
     # ===========================
@@ -677,7 +760,8 @@ class CameraEngine:
     
     def release(self):
         """Libère les ressources"""
-        self.stop_recording()
+        self.stop_csv_recording()
+        self.stop_video_recording()
         if self.cap:
             self.cap.release()
         print("✅ CameraEngine libéré")
@@ -743,10 +827,10 @@ if __name__ == "__main__":
         elif key == ord('r'):
             if not recording_active:
                 output_file = f"test_recording_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-                camera.start_recording(output_file)
+                camera.start_csv_recording(output_file)
                 recording_active = True
             else:
-                camera.stop_recording()
+                camera.stop_csv_recording()
                 recording_active = False
     
     # Cleanup
