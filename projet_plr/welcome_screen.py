@@ -1,307 +1,346 @@
 """
 welcome_screen.py
 =================
-Interface d'accueil vétérinaire.
-Permet de rechercher un animal ou d'en créer un nouveau avant l'examen.
+Interface d'accueil V5 (Avec Latéralité).
 """
 
 import sys
+import pandas as pd
 from datetime import datetime
-from dateutil.relativedelta import relativedelta # pip install python-dateutil
+from dateutil.relativedelta import relativedelta
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QGroupBox, QFormLayout, QComboBox, QDateEdit,
-    QTextEdit, QMessageBox, QSplitter, QRadioButton, QButtonGroup
+    QTextEdit, QMessageBox, QSplitter, QRadioButton, QButtonGroup,
+    QAbstractItemView, QScrollArea, QFrame, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal, QDate
-from PySide6.QtGui import QIcon, QFont
-
+from PySide6.QtGui import QAction
 from db_manager import DatabaseManager
+from plr_results_viewer import PLRResultsDialog
+from settings_dialog import SettingsDialog, ConfigManager
 
 class WelcomeScreen(QMainWindow):
-    """Fenêtre de gestion des patients (Animaux)."""
-    
-    # Signal émis quand un patient est sélectionné pour l'examen
-    patient_selected = Signal(dict) # Envoie le dictionnaire du patient
+    patient_selected = Signal(dict)
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PLR Vet - Accueil")
-        self.resize(1100, 700)
-        
+        self.setWindowTitle("PLR Vet - Accueil & Gestion Patients")
+        self.resize(1200, 750)
         self.db = DatabaseManager()
+        self.config_manager = ConfigManager()
+        self.current_patient_id = None
         self.setup_ui()
+        self._create_menu_bar()
         self.apply_stylesheet()
         self.load_patients()
 
     def setup_ui(self):
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QHBoxLayout(central_widget)
-        
-        # Splitter pour séparer Liste (Gauche) et Formulaire (Droite)
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QHBoxLayout(central)
         splitter = QSplitter(Qt.Horizontal)
         
-        # === GAUCHE : LISTE DES PATIENTS ===
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 10, 0)
+        # GAUCHE (Liste)
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 5, 0)
         
-        # Recherche
-        search_group = QGroupBox("Recherche Patient")
+        lbl_list = QLabel("📂 Base de Données")
+        lbl_list.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        
         search_layout = QHBoxLayout()
         self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("Nom, Tatouage ou Race...")
+        self.search_bar.setPlaceholderText("🔎 Rechercher...")
         self.search_bar.textChanged.connect(self.load_patients)
-        search_layout.addWidget(QLabel("🔍"))
         search_layout.addWidget(self.search_bar)
-        search_group.setLayout(search_layout)
         
-        # Tableau
         self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["Nom", "Espèce", "Tatouage", "Date Ajout"])
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["Nom", "Espèce", "ID / Puce"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
-        self.table.itemDoubleClicked.connect(self.on_table_double_click)
+        self.table.verticalHeader().setVisible(False)
+        self.table.itemClicked.connect(self.on_patient_clicked)
         
-        left_layout.addWidget(search_group)
+        self.btn_new_patient = QPushButton("➕ CRÉER NOUVEAU PATIENT")
+        self.btn_new_patient.setFixedHeight(45)
+        self.btn_new_patient.setCursor(Qt.PointingHandCursor)
+        self.btn_new_patient.clicked.connect(self.mode_create_new)
+        self.btn_new_patient.setStyleSheet("background-color: #007bff; color: white; font-weight: bold;")
+        
+        left_layout.addWidget(lbl_list)
+        left_layout.addLayout(search_layout)
         left_layout.addWidget(self.table)
+        left_layout.addWidget(self.btn_new_patient)
         
-        # === DROITE : FICHE ANIMAL ===
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
+        # DROITE (Détails)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        right_content = QWidget()
+        right_layout = QVBoxLayout(right_content)
         
-        form_group = QGroupBox("Fiche Animal")
-        form_layout = QFormLayout()
-        form_layout.setSpacing(15)
+        # 1. Identité
+        self.grp_identity = QGroupBox("📄 Fiche Patient")
+        form = QFormLayout()
+        self.inp_name = QLineEdit()
+        self.inp_tattoo = QLineEdit()
         
-        # Champs
-        self.input_name = QLineEdit()
-        self.input_tattoo = QLineEdit()
-        self.input_tattoo.setPlaceholderText("ID Unique (Puce/Tatouage)")
-        
-        # Espèce / Race sur la même ligne
-        species_layout = QHBoxLayout()
+        h_species = QHBoxLayout()
         self.combo_species = QComboBox()
-        self.combo_species.addItems(["Chien", "Chat", "Cheval", "NAC", "Autre"])
-        self.input_breed = QLineEdit()
-        self.input_breed.setPlaceholderText("Race")
-        species_layout.addWidget(self.combo_species, 1)
-        species_layout.addWidget(self.input_breed, 2)
+        self.combo_species.addItems(["Chien", "Chat", "Cheval", "NAC"])
+        self.inp_breed = QLineEdit()
+        self.inp_breed.setPlaceholderText("Race")
+        h_species.addWidget(self.combo_species, 1)
+        h_species.addWidget(self.inp_breed, 2)
         
-        # Sexe
-        gender_layout = QHBoxLayout()
-        self.gender_group = QButtonGroup(self)
-        self.radio_m = QRadioButton("Mâle")
-        self.radio_f = QRadioButton("Femelle")
-        self.radio_m.setChecked(True)
-        self.gender_group.addButton(self.radio_m)
-        self.gender_group.addButton(self.radio_f)
-        gender_layout.addWidget(self.radio_m)
-        gender_layout.addWidget(self.radio_f)
-        gender_layout.addStretch()
+        h_gender = QHBoxLayout()
+        self.gender_group = QButtonGroup(right_content)
+        self.rad_m = QRadioButton("Mâle")
+        self.rad_f = QRadioButton("Femelle")
+        self.rad_m.setChecked(True)
+        self.gender_group.addButton(self.rad_m)
+        self.gender_group.addButton(self.rad_f)
+        h_gender.addWidget(self.rad_m)
+        h_gender.addWidget(self.rad_f)
+        h_gender.addStretch()
         
-        # Date Naissance & Age
-        dob_layout = QHBoxLayout()
         self.date_dob = QDateEdit()
-        self.date_dob.setDisplayFormat("dd/MM/yyyy")
         self.date_dob.setCalendarPopup(True)
-        self.date_dob.setDate(QDate.currentDate().addYears(-1)) # Par défaut 1 an
+        self.date_dob.setDate(QDate.currentDate())
         self.date_dob.dateChanged.connect(self.calculate_age)
+        self.lbl_age = QLabel("(Nouveau né)")
+        self.txt_notes = QTextEdit()
+        self.txt_notes.setMaximumHeight(50)
         
-        self.lbl_age = QLabel("1 an")
-        self.lbl_age.setStyleSheet("font-weight: bold; color: #007bff;")
+        form.addRow("Nom:", self.inp_name)
+        form.addRow("ID:", self.inp_tattoo)
+        form.addRow("Espèce:", h_species)
+        form.addRow("Sexe:", h_gender)
+        form.addRow("Né le:", self.date_dob)
+        form.addRow("", self.lbl_age)
+        form.addRow("Notes:", self.txt_notes)
         
-        dob_layout.addWidget(self.date_dob)
-        dob_layout.addWidget(QLabel("  Âge calculé :"))
-        dob_layout.addWidget(self.lbl_age)
-        
-        # Infos Sup
-        self.input_notes = QTextEdit()
-        self.input_notes.setPlaceholderText("Antécédents oculaires, traitement en cours...")
-        self.input_notes.setMaximumHeight(80)
-        
-        # Ajout au formulaire
-        form_layout.addRow("Nom :", self.input_name)
-        form_layout.addRow("Tatouage/ID :", self.input_tattoo)
-        form_layout.addRow("Espèce / Race :", species_layout)
-        form_layout.addRow("Sexe :", gender_layout)
-        form_layout.addRow("Né(e) le :", dob_layout)
-        form_layout.addRow("Notes :", self.input_notes)
-        
-        form_group.setLayout(form_layout)
-        
-        # Boutons Actions
-        btn_layout = QHBoxLayout()
-        
-        self.btn_new = QPushButton("✨ Nouveau")
-        self.btn_new.clicked.connect(self.clear_form)
-        
+        h_actions = QHBoxLayout()
         self.btn_save = QPushButton("💾 Enregistrer")
         self.btn_save.clicked.connect(self.save_patient)
-        self.btn_save.setStyleSheet("background-color: #e0e0e0; color: black;")
+        self.btn_delete = QPushButton("🗑️ Supprimer")
+        self.btn_delete.setStyleSheet("background-color: #dc3545; color: white;")
+        self.btn_delete.clicked.connect(self.delete_patient)
+        self.btn_delete.setVisible(False)
+        h_actions.addWidget(self.btn_save)
+        h_actions.addWidget(self.btn_delete)
+        form.addRow(h_actions)
+        self.grp_identity.setLayout(form)
         
-        self.btn_start = QPushButton("🚀 LANCER EXAMEN")
-        self.btn_start.setFixedHeight(50)
+        # 2. Historique
+        self.grp_history = QGroupBox("📊 Historique")
+        v_hist = QVBoxLayout()
+        self.table_history = QTableWidget()
+        self.table_history.setColumnCount(4)
+        self.table_history.setHorizontalHeaderLabels(["Date", "Oeil", "Type", "Voir"]) # Ajout colonne Oeil
+        self.table_history.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table_history.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table_history.setMinimumHeight(150)
+        v_hist.addWidget(self.table_history)
+        self.grp_history.setLayout(v_hist)
+        
+        # 3. Action (AVEC LATÉRALITÉ)
+        self.grp_start = QGroupBox("🚀 Nouvel Examen")
+        v_start = QVBoxLayout()
+        
+        # Choix de l'oeil
+        lbl_eye = QLabel("Sélectionner l'œil à examiner :")
+        lbl_eye.setStyleSheet("font-weight: bold;")
+        h_eyes = QHBoxLayout()
+        self.eye_group = QButtonGroup(right_content)
+        self.rad_od = QRadioButton("Oeil Droit (OD)")
+        self.rad_og = QRadioButton("Oeil Gauche (OG)")
+        self.rad_od.setChecked(True) # Droit par défaut
+        self.eye_group.addButton(self.rad_od)
+        self.eye_group.addButton(self.rad_og)
+        
+        # Style pour différencier
+        self.rad_od.setStyleSheet("color: #d32f2f; font-weight: bold;") # Rouge
+        self.rad_og.setStyleSheet("color: #1976d2; font-weight: bold;") # Bleu
+        
+        h_eyes.addWidget(self.rad_od)
+        h_eyes.addWidget(self.rad_og)
+        h_eyes.addStretch()
+        
+        self.btn_start = QPushButton("DÉMARRER")
+        self.btn_start.setFixedHeight(45)
         self.btn_start.setStyleSheet("background-color: #28a745; color: white; font-weight: bold; font-size: 14px;")
-        self.btn_start.clicked.connect(self.start_exam)
+        self.btn_start.clicked.connect(self.start_exam_process)
+        self.btn_start.setEnabled(False)
         
-        btn_layout.addWidget(self.btn_new)
-        btn_layout.addWidget(self.btn_save)
+        v_start.addWidget(lbl_eye)
+        v_start.addLayout(h_eyes)
+        v_start.addWidget(self.btn_start)
+        self.grp_start.setLayout(v_start)
         
-        right_layout.addWidget(form_group)
-        right_layout.addLayout(btn_layout)
-        right_layout.addSpacing(20)
-        right_layout.addWidget(self.btn_start)
+        right_layout.addWidget(self.grp_identity)
+        right_layout.addWidget(self.grp_history)
+        right_layout.addWidget(self.grp_start)
         right_layout.addStretch()
+        scroll_area.setWidget(right_content)
         
-        # Assemblage
-        splitter.addWidget(left_panel)
-        splitter.addWidget(right_panel)
-        splitter.setSizes([500, 600]) # Ratio initial
-        
+        splitter.addWidget(left_widget)
+        splitter.addWidget(scroll_area)
+        splitter.setSizes([450, 750])
         main_layout.addWidget(splitter)
+
+    def _create_menu_bar(self):
+        menu = self.menuBar()
+        f_menu = menu.addMenu("Fichier")
+        f_menu.addAction("Quitter", self.close, "Ctrl+Q")
+        
+        o_menu = menu.addMenu("Options")
+        act_s = QAction("Réglages...", self)
+        act_s.triggered.connect(lambda: SettingsDialog(self, self.config_manager).exec())
+        o_menu.addAction(act_s)
+        
+        h_menu = menu.addMenu("Aide")
+        h_menu.addAction("À propos", lambda: QMessageBox.about(self, "About", "PLR Vet V4"))
 
     def apply_stylesheet(self):
         self.setStyleSheet("""
-            QMainWindow { background-color: #f0f2f5; font-family: 'Segoe UI', Arial; }
-            QGroupBox { background-color: white; border: 1px solid #ccc; border-radius: 5px; margin-top: 10px; padding-top: 15px; font-weight: bold; }
-            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; color: #333; }
-            QLineEdit, QDateEdit, QComboBox, QTextEdit { padding: 8px; border: 1px solid #ccc; border-radius: 4px; background: #fafafa; }
-            QLineEdit:focus { border: 1px solid #007bff; background: white; }
-            QTableWidget { border: 1px solid #ccc; background: white; selection-background-color: #007bff; }
-            QPushButton { padding: 8px 15px; border-radius: 4px; font-weight: bold; border: 1px solid #ccc; background: white; }
-            QPushButton:hover { background-color: #e9ecef; }
+            QMainWindow { background: #f0f2f5; font-size: 10pt; }
+            QGroupBox { background: white; border: 1px solid #ccc; font-weight: bold; margin-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+            QLineEdit, QComboBox, QDateEdit { padding: 5px; background: #fff; border: 1px solid #ccc; }
+            QPushButton { padding: 6px; border-radius: 4px; border: 1px solid #ccc; background: #e2e6ea; }
+            QPushButton:hover { background: #dbe2ef; }
         """)
 
-    def calculate_age(self):
-        """Calcule l'âge automatiquement."""
-        dob = self.date_dob.date().toPython()
-        today = datetime.now().date()
-        
-        delta = relativedelta(today, dob)
-        
-        age_str = ""
-        if delta.years > 0:
-            age_str += f"{delta.years} an{'s' if delta.years > 1 else ''}"
-        if delta.months > 0:
-            if age_str: age_str += " "
-            age_str += f"{delta.months} mois"
-            
-        if not age_str: # Moins d'un mois
-            age_str = f"{delta.days} jours"
-            
-        self.lbl_age.setText(age_str)
-
     def load_patients(self):
-        """Charge la liste depuis la DB."""
         query = self.search_bar.text()
         patients = self.db.search_patients(query)
-        
         self.table.setRowCount(0)
         for row, p in enumerate(patients):
             self.table.insertRow(row)
             self.table.setItem(row, 0, QTableWidgetItem(p['name']))
             self.table.setItem(row, 1, QTableWidgetItem(p['species']))
             self.table.setItem(row, 2, QTableWidgetItem(p['tattoo_id']))
-            
-            date_str = p['created_at'].split(" ")[0] # Juste la date
-            self.table.setItem(row, 3, QTableWidgetItem(date_str))
-            
-            # On stocke l'ID complet dans l'item caché pour récupération
             self.table.item(row, 0).setData(Qt.UserRole, p)
 
-    def on_table_double_click(self, item):
-        """Remplit le formulaire au clic."""
-        # Récupérer les données stockées dans la colonne 0
-        data = self.table.item(item.row(), 0).data(Qt.UserRole)
-        if data:
-            self.input_name.setText(data['name'])
-            self.input_tattoo.setText(data['tattoo_id'])
-            self.combo_species.setCurrentText(data['species'])
-            self.input_breed.setText(data['breed'])
-            self.input_notes.setText(data['notes'])
-            
-            if data['gender'] == 'M': self.radio_m.setChecked(True)
-            else: self.radio_f.setChecked(True)
-            
-            if data['birth_date']:
-                qdate = QDate.fromString(data['birth_date'], "yyyy-MM-dd")
-                self.date_dob.setDate(qdate)
+    def on_patient_clicked(self, item):
+        p = self.table.item(item.row(), 0).data(Qt.UserRole)
+        self.current_patient_id = p['id']
+        self.inp_name.setText(p['name'])
+        self.inp_tattoo.setText(p['tattoo_id'])
+        self.combo_species.setCurrentText(p['species'])
+        self.inp_breed.setText(p['breed'])
+        self.txt_notes.setText(p['notes'])
+        if p['gender']=='F': self.rad_f.setChecked(True)
+        else: self.rad_m.setChecked(True)
+        if p['birth_date']: self.date_dob.setDate(QDate.fromString(p['birth_date'], "yyyy-MM-dd"))
+        
+        self.grp_identity.setTitle(f"👤 Édition : {p['name']}")
+        self.btn_save.setText("💾 Mettre à jour")
+        self.btn_delete.setVisible(True)
+        self.btn_start.setEnabled(True)
+        self.load_history(p['id'])
 
-    def clear_form(self):
-        self.input_name.clear()
-        self.input_tattoo.clear()
-        self.input_breed.clear()
-        self.input_notes.clear()
-        self.date_dob.setDate(QDate.currentDate())
+    def mode_create_new(self):
+        self.current_patient_id = None
+        self.inp_name.clear()
+        self.inp_tattoo.clear()
+        self.inp_breed.clear()
+        self.txt_notes.clear()
         self.table.clearSelection()
+        self.grp_identity.setTitle("✨ Nouveau Patient")
+        self.btn_save.setText("💾 Créer Fiche")
+        self.btn_delete.setVisible(False)
+        self.btn_start.setEnabled(False)
+        self.exam_list_clear()
+
+    def exam_list_clear(self):
+        self.table_history.setRowCount(0)
+
+    def load_history(self, pid):
+        exams = self.db.get_patient_history(pid)
+        self.table_history.setRowCount(0)
+        for row, ex in enumerate(exams):
+            self.table_history.insertRow(row)
+            d = ex['exam_date'].split(" ")[0]
+            
+            # Affichage Latéralité avec couleur
+            lat = ex.get('laterality', '??')
+            item_lat = QTableWidgetItem(lat)
+            if lat == 'OD': item_lat.setForeground(QColor('#d32f2f'))
+            elif lat == 'OG': item_lat.setForeground(QColor('#1976d2'))
+            item_lat.setTextAlignment(Qt.AlignCenter)
+            item_lat.setFlags(Qt.ItemIsEnabled)
+            
+            self.table_history.setItem(row, 0, QTableWidgetItem(d))
+            self.table_history.setItem(row, 1, item_lat)
+            self.table_history.setItem(row, 2, QTableWidgetItem(ex.get('exam_type', 'PLR')))
+            
+            btn = QPushButton("👁️")
+            btn.clicked.connect(lambda ch, e=ex: self.view_exam(e))
+            self.table_history.setCellWidget(row, 3, btn)
 
     def save_patient(self):
-        name = self.input_name.text().strip()
-        tattoo = self.input_tattoo.text().strip()
-        
-        if not name or not tattoo:
-            QMessageBox.warning(self, "Erreur", "Le nom et le tatouage/ID sont obligatoires.")
-            return
-
-        gender = "M" if self.radio_m.isChecked() else "F"
+        # Logique de sauvegarde identique...
+        name = self.inp_name.text().strip()
+        tattoo = self.inp_tattoo.text().strip()
+        if not name or not tattoo: return
+        gender = "M" if self.rad_m.isChecked() else "F"
         dob = self.date_dob.date().toString("yyyy-MM-dd")
         
-        pid = self.db.add_patient(
-            tattoo_id=tattoo,
-            name=name,
-            species=self.combo_species.currentText(),
-            breed=self.input_breed.text(),
-            gender=gender,
-            birth_date=dob,
-            notes=self.input_notes.toPlainText()
-        )
-        
-        if pid != -1:
-            self.load_patients()
-            QMessageBox.information(self, "Succès", "Animal enregistré !")
+        if self.current_patient_id is None:
+            pid = self.db.add_patient(tattoo, name, self.combo_species.currentText(),
+                                    self.inp_breed.text(), gender, dob, notes=self.txt_notes.toPlainText())
+            if pid != -1: self.load_patients()
         else:
-            QMessageBox.warning(self, "Erreur", "Erreur lors de l'enregistrement (ID existant ?).")
+            self.db.update_patient(self.current_patient_id, name, self.combo_species.currentText(),
+                                  self.inp_breed.text(), gender, dob, self.txt_notes.toPlainText())
+            self.load_patients()
 
-    def start_exam(self):
-        """Lance l'examen pour le patient affiché."""
-        name = self.input_name.text().strip()
-        tattoo = self.input_tattoo.text().strip()
-        
-        if not name or not tattoo:
-            QMessageBox.warning(self, "Attention", "Veuillez sélectionner ou créer un patient d'abord.")
-            return
-            
-        # Si le patient n'est pas encore en base, on le crée à la volée
-        # On vérifie s'il existe déjà via le tatouage
-        existing = self.db.search_patients(tattoo)
-        patient_data = None
-        
-        # On cherche correspondance exacte
-        for p in existing:
-            if p['tattoo_id'] == tattoo:
-                patient_data = p
-                break
-        
-        if not patient_data:
-            # Création automatique
-            self.save_patient()
-            # Récupération après sauvegarde
-            existing = self.db.search_patients(tattoo)
-            if existing: patient_data = existing[0]
-        
-        if patient_data:
-            self.patient_selected.emit(patient_data)
-            self.close()
+    def delete_patient(self):
+        if self.current_patient_id:
+            if QMessageBox.question(self, "Sur ?", "Supprimer ?") == QMessageBox.Yes:
+                self.db.delete_patient(self.current_patient_id)
+                self.load_patients()
+                self.mode_create_new()
+
+    def view_exam(self, exam):
+        try:
+            df = pd.read_csv(exam['csv_path'])
+            results = exam.get('results_data', {})
+            # Titre avec latéralité
+            lat = exam.get('laterality', '')
+            title = f"Examen du {exam['exam_date']} - {lat}"
+            d = PLRResultsDialog(self, data=df, results=results, title=title)
+            d.exec()
+        except: pass
+
+    def calculate_age(self):
+        dob = self.date_dob.date().toPython()
+        d = relativedelta(datetime.now().date(), dob)
+        self.lbl_age.setText(f"({d.years} ans, {d.months} mois)")
+
+    def start_exam_process(self):
+        if not self.current_patient_id: return
+        p_data = {
+            'id': self.current_patient_id,
+            'name': self.inp_name.text(),
+            'tattoo_id': self.inp_tattoo.text(),
+            'species': self.combo_species.currentText(),
+            # AJOUT DE LA LATÉRALITÉ
+            'laterality': 'OD' if self.rad_od.isChecked() else 'OG'
+        }
+        self.patient_selected.emit(p_data)
+        self.close()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = WelcomeScreen()
-    window.show()
+    w = WelcomeScreen()
+    w.show()
     sys.exit(app.exec())

@@ -6,14 +6,13 @@
         "response_duration": 8.0
     },
     "camera": {
-        "index": 0,
+        "index": 1,
         "width": 640,
         "height": 480,
         "fps": 30,
         "exposure": -6,
         "gain": 0,
-        "auto_exposure": true,
-        "mm_per_pixel": 0.3484340062842509
+        "auto_exposure": true
     },
     "detection": {
         "canny_threshold1": 50,

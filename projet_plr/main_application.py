@@ -1,14 +1,8 @@
 """
 main_application.py
 ===================
-Interface principale de l'application PLR (Pupillary Light Reflex).
-Version: 2.0.0 (Version Vétérinaire Complète)
-
-Fonctionnalités:
-- Point d'entrée : Écran d'accueil (Gestion Patients/Animaux)
-- Interface Examen : Vidéo temps réel, Contrôles, Calibration
-- Moteur de Test : Protocole multi-flash configurable
-- Analyse & Résultats : Traitement immédiat et sauvegarde DB
+Interface Examen Vétérinaire Intégrée.
+Version: 3.4.0 (Latéralité dans la Main Window)
 """
 
 import sys
@@ -16,297 +10,277 @@ import cv2
 import numpy as np
 import os
 import logging
-from datetime import datetime
-
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QSlider, QComboBox,
-    QGroupBox, QMessageBox, QStatusBar, QInputDialog, QSizePolicy
+    QPushButton, QLabel, QSlider, QComboBox, QGroupBox, QMessageBox, 
+    QStatusBar, QInputDialog, QSplitter, QProgressBar, QTableWidget,
+    QTableWidgetItem, QHeaderView, QAbstractItemView, QRadioButton, QButtonGroup
 )
-from PySide6.QtCore import (
-    Qt, Signal, Slot, QThread, QTimer, QSize
-)
-from PySide6.QtGui import (
-    QImage, QPixmap, QColor
-)
+from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer
+from PySide6.QtGui import QImage, QPixmap, QAction, QColor
 
-# --- IMPORTS DES MODULES PROJET ---
 from camera_engine import CameraEngine
 from settings_dialog import SettingsDialog, ConfigManager
-from plr_test_engine import PLRTestEngine, TestPhase
+from plr_test_engine import PLRTestEngine
 from plr_analyzer import PLRAnalyzer
-from plr_results_viewer import PLRResultsViewer
+from plr_results_viewer import PLRGraphWidget
 from db_manager import DatabaseManager
 from welcome_screen import WelcomeScreen
 from calibration_dialog import CalibrationDialog
 
-# Configuration du logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# Alias pour compatibilité
-pyqtSignal = Signal
-pyqtSlot = Slot
-
+logging.basicConfig(level=logging.INFO)
 
 # ===========================
-# WIDGET FLASH (STIMULUS)
+# WIDGETS UTILITAIRES
 # ===========================
 class FlashOverlay(QWidget):
-    """
-    Fenêtre plein écran blanche pour simuler le flash lumineux.
-    Elle se superpose à l'interface pendant la phase 'Stimulation'.
-    """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background-color: #FFFFFF;")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setCursor(Qt.BlankCursor)
         self.setWindowOpacity(1.0)
-        
-        screen_geometry = QApplication.primaryScreen().geometry()
-        self.setGeometry(screen_geometry)
+        self.setGeometry(QApplication.primaryScreen().geometry())
 
-
-# ===========================
-# THREAD CAMÉRA
-# ===========================
 class CameraThread(QThread):
-    """Thread dédié pour la capture/détection caméra."""
-    
-    frame_ready = pyqtSignal(np.ndarray)
-    pupil_detected = pyqtSignal(dict)
-    fps_updated = pyqtSignal(float)
-    error_occurred = pyqtSignal(str)
-    camera_started = pyqtSignal()
-    
+    frame_ready = Signal(np.ndarray)
+    pupil_detected = Signal(dict)
+    fps_updated = Signal(float)
+    error_occurred = Signal(str)
+    camera_started = Signal()
     def __init__(self, camera_index=0):
         super().__init__()
         self.camera = None
         self.camera_index = camera_index
         self.running = False
-        self.config_manager = ConfigManager()
-    
     def run(self):
         try:
             self.camera = CameraEngine(self.camera_index)
             self.running = True
-            
-            # Signaler que la caméra est prête
             self.camera_started.emit()
-            
             while self.running:
                 frame, pupil_data = self.camera.grab_and_detect()
                 self.frame_ready.emit(frame)
-                
-                if pupil_data:
-                    self.pupil_detected.emit(pupil_data)
-                
+                if pupil_data: self.pupil_detected.emit(pupil_data)
                 self.fps_updated.emit(self.camera.fps)
                 self.msleep(1)
-        
         except Exception as e:
-            self.error_occurred.emit(f"Erreur caméra: {str(e)}")
-        
+            self.error_occurred.emit(str(e))
         finally:
-            if self.camera:
-                self.camera.release()
-    
+            if self.camera: self.camera.release()
     def stop(self):
         self.running = False
         self.wait(2000)
+    def set_threshold(self, v): 
+        if self.camera: self.camera.set_threshold(v)
+    def set_blur(self, v): 
+        if self.camera: self.camera.set_blur_kernel(v)
+    def set_display_mode(self, m): 
+        if self.camera: self.camera.set_display_mode(m)
+    def start_recording(self, f): 
+        if self.camera: self.camera.start_csv_recording(f)
+    def stop_recording(self): 
+        if self.camera: self.camera.stop_csv_recording()
 
-    # Proxy methods
-    def set_threshold(self, value):
-        if self.camera: self.camera.set_threshold(value)
-    
-    def set_blur(self, value):
-        if self.camera: self.camera.set_blur_kernel(value)
-    
-    def set_display_mode(self, mode):
-        if self.camera: self.camera.set_display_mode(mode)
-
-
-# ===========================
-# WIDGET VIDÉO
-# ===========================
 class VideoWidget(QLabel):
     def __init__(self):
         super().__init__()
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setStyleSheet("background-color: #000000; border: 2px solid #666;")
-        self.setMinimumSize(640, 480)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-    
-    @pyqtSlot(np.ndarray)
+        self.setAlignment(Qt.AlignCenter)
+        self.setStyleSheet("background-color: black;")
+        self.setMinimumSize(400, 300)
+    @Slot(np.ndarray)
     def update_frame(self, frame):
         try:
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            h, w, ch = rgb_frame.shape
-            qt_image = QImage(rgb_frame.data, w, h, ch * w, QImage.Format.Format_RGB888)
-            pixmap = QPixmap.fromImage(qt_image)
-            self.setPixmap(pixmap.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        except Exception:
-            pass
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb.shape
+            img = QImage(rgb.data, w, h, ch*w, QImage.Format.Format_RGB888)
+            self.setPixmap(QPixmap.fromImage(img).scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        except: pass
 
-
-# ===========================
-# PANNEAU DE CONTRÔLE
-# ===========================
+# --- CONTROL PANEL MODIFIÉ (Avec Latéralité) ---
 class ControlPanel(QWidget):
-    threshold_changed = pyqtSignal(int)
-    blur_changed = pyqtSignal(int)
-    display_mode_changed = pyqtSignal(str)
-    test_requested = pyqtSignal()
-    settings_requested = pyqtSignal()
-    
+    threshold_changed = Signal(int)
+    blur_changed = Signal(int)
+    display_mode_changed = Signal(str)
+    test_requested = Signal()
+    settings_requested = Signal()
+    reset_camera_requested = Signal()
+
     def __init__(self):
         super().__init__()
         self.setup_ui()
-    
+
     def setup_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(15)
+        lay = QVBoxLayout(self)
         
-        # Affichage
-        display_group = QGroupBox("👁️ Affichage")
-        display_layout = QVBoxLayout()
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Normal", "ROI", "Binaire", "Mosaïque"])
-        self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
-        display_layout.addWidget(QLabel("Mode:"))
-        display_layout.addWidget(self.mode_combo)
-        display_group.setLayout(display_layout)
-        layout.addWidget(display_group)
+        # 1. LATÉRALITÉ (Nouveau)
+        grp_eye = QGroupBox("Choix de l'Œil")
+        grp_eye.setStyleSheet("QGroupBox { border: 1px solid #999; font-weight: bold; }")
+        h_eye = QHBoxLayout()
+        self.eye_group = QButtonGroup(self)
         
-        # Détection
-        detection_group = QGroupBox("🔍 Détection")
-        detection_layout = QVBoxLayout()
-        self.threshold_label = QLabel("Seuil: 50")
-        self.threshold_slider = QSlider(Qt.Orientation.Horizontal)
-        self.threshold_slider.setRange(0, 255)
-        self.threshold_slider.setValue(50)
-        self.threshold_slider.valueChanged.connect(self._on_threshold_changed)
-        self.blur_label = QLabel("Flou: 5")
-        self.blur_slider = QSlider(Qt.Orientation.Horizontal)
-        self.blur_slider.setRange(1, 21)
-        self.blur_slider.setValue(5)
-        self.blur_slider.setSingleStep(2)
-        self.blur_slider.valueChanged.connect(self._on_blur_changed)
-        detection_layout.addWidget(self.threshold_label)
-        detection_layout.addWidget(self.threshold_slider)
-        detection_layout.addWidget(self.blur_label)
-        detection_layout.addWidget(self.blur_slider)
-        detection_group.setLayout(detection_layout)
-        layout.addWidget(detection_group)
+        self.rad_od = QRadioButton("OD (Droit)")
+        self.rad_od.setStyleSheet("color: #d32f2f; font-weight: bold;")
+        self.rad_od.setChecked(True)
         
-        # Actions
-        actions_group = QGroupBox("⚡ Actions")
-        actions_layout = QVBoxLayout()
-        self.test_btn = QPushButton("▶ LANCER TEST PLR")
-        self.test_btn.setStyleSheet("""
-            QPushButton { background-color: #28a745; color: white; font-weight: bold; font-size: 14px; padding: 12px; border-radius: 5px; }
-            QPushButton:hover { background-color: #218838; }
-        """)
-        self.test_btn.clicked.connect(self.test_requested.emit)
-        self.settings_btn = QPushButton("⚙ Options")
-        self.settings_btn.setStyleSheet("""
-            QPushButton { background-color: #007bff; color: white; font-weight: bold; padding: 10px; border-radius: 5px; }
-            QPushButton:hover { background-color: #0056b3; }
-        """)
-        self.settings_btn.clicked.connect(self.settings_requested.emit)
-        actions_layout.addWidget(self.test_btn)
-        actions_layout.addWidget(self.settings_btn)
-        actions_group.setLayout(actions_layout)
-        layout.addWidget(actions_group)
+        self.rad_og = QRadioButton("OG (Gauche)")
+        self.rad_og.setStyleSheet("color: #1976d2; font-weight: bold;")
         
-        # Infos
-        info_group = QGroupBox("📊 Informations")
-        info_layout = QVBoxLayout()
-        self.fps_label = QLabel("FPS: --")
-        self.diameter_label = QLabel("Diamètre: --")
-        self.quality_label = QLabel("Qualité: --")
-        info_layout.addWidget(self.fps_label)
-        info_layout.addWidget(self.diameter_label)
-        info_layout.addWidget(self.quality_label)
-        info_group.setLayout(info_layout)
-        layout.addWidget(info_group)
-        
-        layout.addStretch()
-        self.setLayout(layout)
-        self.setFixedWidth(280)
+        self.eye_group.addButton(self.rad_od)
+        self.eye_group.addButton(self.rad_og)
+        h_eye.addWidget(self.rad_od)
+        h_eye.addWidget(self.rad_og)
+        grp_eye.setLayout(h_eye)
+        lay.addWidget(grp_eye)
 
-    def _on_threshold_changed(self, value):
-        self.threshold_label.setText(f"Seuil: {value}")
-        self.threshold_changed.emit(value)
-    
-    def _on_blur_changed(self, value):
-        if value % 2 == 0: value += 1
-        self.blur_slider.setValue(value)
-        self.blur_label.setText(f"Flou: {value}")
-        self.blur_changed.emit(value)
-    
-    def _on_mode_changed(self, text):
-        mode_map = {"Normal": "normal", "ROI": "roi", "Binaire": "binary", "Mosaïque": "mosaic"}
-        self.display_mode_changed.emit(mode_map[text])
-    
-    def update_info(self, fps=None, diameter=None, quality=None):
-        if fps is not None: self.fps_label.setText(f"FPS: {fps:.1f}")
-        if diameter is not None: self.diameter_label.setText(f"Diamètre: {diameter:.2f} mm")
-        if quality is not None:
-            color = "#008000" if quality > 80 else "#d35400"
-            self.quality_label.setText(f"<span style='color:{color}; font-weight:bold'>Qualité: {quality:.0f}%</span>")
+        # 2. Réglages
+        grp_set = QGroupBox("Réglages Caméra")
+        flay = QVBoxLayout()
+        
+        self.sl_thresh = QSlider(Qt.Horizontal)
+        self.sl_thresh.setRange(0, 255)
+        self.sl_thresh.setValue(50)
+        self.sl_thresh.valueChanged.connect(self.threshold_changed.emit)
+        flay.addWidget(QLabel("Seuil"))
+        flay.addWidget(self.sl_thresh)
+        
+        self.sl_blur = QSlider(Qt.Horizontal)
+        self.sl_blur.setRange(1, 21)
+        self.sl_blur.setValue(5)
+        self.sl_blur.setSingleStep(2)
+        self.sl_blur.valueChanged.connect(self.blur_changed.emit)
+        flay.addWidget(QLabel("Flou"))
+        flay.addWidget(self.sl_blur)
 
+        self.cb_mode = QComboBox()
+        self.cb_mode.addItems(["Normal", "ROI", "Binaire", "Mosaïque"])
+        self.cb_mode.currentTextChanged.connect(self._on_mode)
+        flay.addWidget(QLabel("Vue"))
+        flay.addWidget(self.cb_mode)
+        grp_set.setLayout(flay)
+        lay.addWidget(grp_set)
+        
+        # 3. Actions
+        self.btn_test = QPushButton("▶ LANCER EXAMEN")
+        self.btn_test.setFixedHeight(50)
+        self.btn_test.setStyleSheet("background-color: #28a745; color: white; font-weight: bold; font-size: 14px; border-radius: 5px;")
+        self.btn_test.clicked.connect(self.test_requested.emit)
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setAlignment(Qt.AlignCenter)
+        self.progress_bar.setStyleSheet("QProgressBar { border: 1px solid grey; border-radius: 5px; text-align: center; background: #eee; } QProgressBar::chunk { background-color: #28a745; }")
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("Prêt")
+        
+        self.btn_reset = QPushButton("🔄 Réinit. Caméra")
+        self.btn_reset.setStyleSheet("background-color: #e67e22; color: white; padding: 5px; border-radius: 4px;")
+        self.btn_reset.clicked.connect(self.reset_camera_requested.emit)
+
+        lay.addWidget(self.btn_test)
+        lay.addWidget(self.progress_bar)
+        lay.addSpacing(10)
+        lay.addWidget(self.btn_reset)
+        lay.addStretch()
+        
+        self.lbl_info = QLabel("--")
+        self.lbl_info.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self.lbl_info)
+
+    def _on_mode(self, t): self.display_mode_changed.emit({"Normal":"normal","ROI":"roi","Binaire":"binary","Mosaïque":"mosaic"}[t])
+    def update_info(self, d=None, q=None):
+        if d: self.lbl_info.setText(f"Ø: {d:.2f}mm | Q: {q:.0f}%")
+        
+    def get_selected_eye(self):
+        return "OD" if self.rad_od.isChecked() else "OG"
 
 # ===========================
-# FENÊTRE PRINCIPALE
+# MAIN WINDOW VÉTÉRINAIRE
 # ===========================
 class MainWindow(QMainWindow):
-    """Fenêtre principale orchestrant le tout."""
-    
-    def __init__(self, patient_data=None):
+    def __init__(self, patient_data):
         super().__init__()
-        self.patient_data = patient_data
-        self.config_manager = ConfigManager()
+        self.patient = patient_data
         self.db = DatabaseManager()
+        self.conf = ConfigManager()
+        self.temp_result_meta = None 
         self.camera_thread = None
-        self.test_engine = None
-        self.flash_overlay = None
+        self.engine = None
+        self.total_test_duration = 0.0
         
         self.setup_ui()
         self.start_camera()
         
-        # Titre personnalisé
-        if self.patient_data:
-            self.setWindowTitle(f"PLR Analyzer - Examen de {self.patient_data['name']} ({self.patient_data['species']})")
-    
+        if self.patient:
+            self.setWindowTitle(f"Dossier Patient : {self.patient['name']} ({self.patient['species']})")
+            self.load_patient_history()
+
     def setup_ui(self):
-        self.setWindowTitle("PLR Analyzer - Pupillary Light Reflex")
-        self.setGeometry(100, 100, 1200, 700)
+        self.resize(1300, 800)
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_lay = QHBoxLayout(central)
         
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        # --- GAUCHE ---
+        left_panel = QWidget()
+        left_lay = QVBoxLayout(left_panel)
+        self.video = VideoWidget()
+        self.controls = ControlPanel()
         
-        main_layout = QHBoxLayout()
-        self.video_widget = VideoWidget()
-        main_layout.addWidget(self.video_widget, stretch=3)
-        self.control_panel = ControlPanel()
-        main_layout.addWidget(self.control_panel)
-        central_widget.setLayout(main_layout)
+        self.controls.threshold_changed.connect(lambda v: self.camera_thread.set_threshold(v) if self.camera_thread else None)
+        self.controls.blur_changed.connect(lambda v: self.camera_thread.set_blur(v) if self.camera_thread else None)
+        self.controls.display_mode_changed.connect(lambda m: self.camera_thread.set_display_mode(m) if self.camera_thread else None)
+        self.controls.test_requested.connect(self.start_test)
+        self.controls.reset_camera_requested.connect(self.reset_camera)
         
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("🟢 Prêt")
+        left_lay.addWidget(self.video, stretch=3)
+        left_lay.addWidget(self.controls, stretch=1)
         
+        # --- DROITE ---
+        right_panel = QWidget()
+        right_lay = QVBoxLayout(right_panel)
+        
+        self.graph_widget = PLRGraphWidget()
+        
+        self.valid_group = QGroupBox("Validation Résultat")
+        self.valid_group.setStyleSheet("QGroupBox { background-color: #f9fbe7; border: 1px solid #c0ca33; }")
+        valid_lay = QHBoxLayout()
+        self.btn_save = QPushButton("💾 SAUVEGARDER L'EXAMEN")
+        self.btn_save.setStyleSheet("background-color: #007bff; color: white; padding: 10px; font-weight: bold; border-radius: 4px;")
+        self.btn_save.clicked.connect(self.save_exam)
+        self.btn_discard = QPushButton("🗑️ Jeter")
+        self.btn_discard.setStyleSheet("background-color: #dc3545; color: white; padding: 10px; border-radius: 4px;")
+        self.btn_discard.clicked.connect(self.discard_exam)
+        valid_lay.addWidget(self.btn_save)
+        valid_lay.addWidget(self.btn_discard)
+        self.valid_group.setLayout(valid_lay)
+        self.valid_group.setVisible(False) 
+        
+        self.grp_history = QGroupBox(f"Historique")
+        hist_lay = QVBoxLayout()
+        self.table_history = QTableWidget()
+        self.table_history.setColumnCount(4)
+        self.table_history.setHorizontalHeaderLabels(["Date", "Oeil", "Type", "Comparer"])
+        self.table_history.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table_history.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table_history.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_history.itemClicked.connect(self.on_history_clicked)
+        hist_lay.addWidget(self.table_history)
+        self.grp_history.setLayout(hist_lay)
+        
+        right_lay.addWidget(QLabel("<h3>Analyse Temps Réel</h3>"))
+        right_lay.addWidget(self.graph_widget, stretch=4)
+        right_lay.addWidget(self.valid_group)
+        right_lay.addWidget(self.grp_history, stretch=2)
+        
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(left_panel)
+        splitter.addWidget(right_panel)
+        splitter.setSizes([500, 800])
+        main_lay.addWidget(splitter)
+        
+        self.status = QStatusBar()
+        self.setStatusBar(self.status)
         self._create_menu_bar()
         self._apply_light_theme()
-        
-        # Connexions
-        self.control_panel.threshold_changed.connect(self._on_threshold_changed)
-        self.control_panel.blur_changed.connect(self._on_blur_changed)
-        self.control_panel.display_mode_changed.connect(self._on_display_mode_changed)
-        self.control_panel.test_requested.connect(self._on_test_requested)
-        self.control_panel.settings_requested.connect(self._on_settings_requested)
 
     def _apply_light_theme(self):
         self.setStyleSheet("""
@@ -315,200 +289,280 @@ class MainWindow(QMainWindow):
             QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; color: #333; }
             QLabel { color: #000; }
             QStatusBar { background-color: #e9ecef; }
+            QTableWidget { background-color: white; border: 1px solid #ccc; }
         """)
 
     def _create_menu_bar(self):
         menu_bar = self.menuBar()
-        file_menu = menu_bar.addMenu("Fichier")
-        file_menu.addAction("Quitter", self.close, "Ctrl+Q")
+        f_menu = menu_bar.addMenu("Fichier")
+        act_home = QAction("🏠 Retour à l'accueil", self)
+        act_home.triggered.connect(self.return_to_home)
+        f_menu.addAction(act_home)
+        f_menu.addSeparator()
+        act_quit = QAction("Quitter", self)
+        act_quit.setShortcut("Ctrl+Q")
+        act_quit.triggered.connect(self.close)
+        f_menu.addAction(act_quit)
         
-        opts_menu = menu_bar.addMenu("Options")
-        opts_menu.addAction("⚙ Réglages...", self._on_settings_requested)
-        opts_menu.addAction("📏 Calibration...", self._on_calibration_requested)
+        o_menu = menu_bar.addMenu("Options")
+        act_settings = QAction("⚙ Réglages...", self)
+        act_settings.triggered.connect(self._on_settings_requested)
+        o_menu.addAction(act_settings)
+        act_calib = QAction("📏 Calibration...", self)
+        act_calib.triggered.connect(self._on_calibration_requested)
+        o_menu.addAction(act_calib)
         
-        help_menu = menu_bar.addMenu("Aide")
-        help_menu.addAction("À propos", self._show_about)
+        h_menu = menu_bar.addMenu("Aide")
+        h_menu.addAction("À propos", self._show_about)
 
-    # --- CAMÉRA ---
     def start_camera(self):
         self.camera_thread = CameraThread(0)
-        self.camera_thread.frame_ready.connect(self.video_widget.update_frame)
-        self.camera_thread.pupil_detected.connect(self._on_pupil_detected)
-        self.camera_thread.fps_updated.connect(lambda fps: self.control_panel.update_info(fps=fps))
-        self.camera_thread.error_occurred.connect(lambda e: self.status_bar.showMessage(f"🔴 {e}"))
-        
-        self.camera_thread.camera_started.connect(self._init_test_engine)
+        self.camera_thread.frame_ready.connect(self.video.update_frame)
+        self.camera_thread.pupil_detected.connect(lambda d: self.controls.update_info(d=d['diameter_mm'], q=d['quality_score']))
+        self.camera_thread.camera_started.connect(self.init_engine)
         self.camera_thread.start()
 
-    def _init_test_engine(self):
+    def init_engine(self):
+        cam_conf = self.conf.config.get("camera", {})
+        det_conf = self.conf.config.get("detection", {})
+        ratio = float(cam_conf.get("mm_per_pixel", 0.05))
+        self.camera_thread.camera.mm_per_pixel = ratio
+        thresh = int(det_conf.get("canny_threshold1", 50))
+        blur = int(det_conf.get("gaussian_blur", 5))
+        self.camera_thread.set_threshold(thresh)
+        self.camera_thread.set_blur(blur)
+        self.controls.sl_thresh.blockSignals(True)
+        self.controls.sl_thresh.setValue(thresh)
+        self.controls.sl_thresh.blockSignals(False)
+        self.controls.sl_blur.blockSignals(True)
+        self.controls.sl_blur.setValue(blur)
+        self.controls.sl_blur.blockSignals(False)
+        self.engine = PLRTestEngine(self.camera_thread.camera)
+        self.engine.flash_triggered.connect(self.trigger_flash)
+        self.engine.test_finished.connect(self.on_test_finished)
+        self.engine.progress_updated.connect(self.on_test_progress)
+        self.status.showMessage(f"Prêt (Calibration: {ratio:.4f} mm/px)")
+
+    def reset_camera(self):
+        self.status.showMessage("⏳ Réinitialisation caméra...")
+        self.stop_camera()
+        QTimer.singleShot(500, self.start_camera)
+
+    def trigger_flash(self, on):
+        if on:
+            self.flash = FlashOverlay()
+            self.flash.showFullScreen()
+            QApplication.processEvents()
+        else:
+            if hasattr(self, 'flash'): self.flash.close()
+
+    def start_test(self):
+        if not self.engine: 
+            QMessageBox.warning(self, "Erreur", "Caméra non prête")
+            return
+        self.valid_group.setVisible(False) 
+        self.graph_widget.axes.clear()     
+        self.graph_widget.canvas.draw()
+        
+        pc = self.conf.config.get("protocol", {})
+        base = pc.get("baseline_duration", 2.0)
+        count = pc.get("flash_count", 1)
+        flash = pc.get("flash_duration_ms", 200)
+        resp = pc.get("response_duration", 5.0)
+        
+        self.total_test_duration = base + count * ((flash/1000.0) + resp)
+        self.controls.progress_bar.setRange(0, int(self.total_test_duration * 10))
+        self.controls.progress_bar.setValue(0)
+        self.engine.configure(baseline_duration=base, flash_count=count, flash_duration_ms=flash, response_duration=resp)
+        
+        # RÉCUPÉRATION DE L'ŒIL SÉLECTIONNÉ
+        current_eye = self.controls.get_selected_eye()
+        ref = f"{self.patient['name']}_{self.patient['tattoo_id']}_{current_eye}"
+        
+        # On stocke l'info pour l'analyse
+        self.current_laterality = current_eye
+        
+        self.engine.start_test(ref)
+        self.controls.setEnabled(False)
+
+    def on_test_progress(self, elapsed, phase_name):
+        val = int(elapsed * 10)
+        self.controls.progress_bar.setValue(val)
+        self.controls.progress_bar.setFormat(f"{phase_name} : {elapsed:.1f}s / {self.total_test_duration:.1f}s")
+
+    def on_test_finished(self, meta):
+        self.controls.setEnabled(True)
+        self.controls.progress_bar.setValue(self.controls.progress_bar.maximum())
+        self.controls.progress_bar.setFormat("Terminé")
+        self.status.showMessage("Analyse...")
+        csv_path = meta['csv_path']
+        try:
+            if os.path.getsize(csv_path) < 100:
+                QMessageBox.warning(self, "Erreur", "Examen vide.")
+                try: os.remove(csv_path)
+                except: pass
+                return
+        except: pass
+        
+        analyzer = PLRAnalyzer()
+        if analyzer.load_data(csv_path):
+            analyzer.preprocess()
+            metrics = analyzer.analyze(flash_timestamp=meta['flash_timestamp'])
+            metrics['flash_timestamp'] = meta['flash_timestamp']
+            metrics['flash_duration_s'] = meta['config']['flash_duration_ms'] / 1000.0
+            
+            # Utilisation de la latéralité courante pour la couleur
+            col = '#b71c1c' if self.current_laterality == 'OD' else '#0d47a1'
+            curve_data = {
+                'label': f'Actuel ({self.current_laterality})',
+                'df': analyzer.data,
+                'metrics': metrics,
+                'color': col
+            }
+            self.graph_widget.plot_data([curve_data], clear=True)
+            self.temp_result_meta = {'csv': meta['csv_path'], 'metrics': metrics}
+            self.valid_group.setVisible(True)
+            self.status.showMessage("Examen terminé.")
+
+    def load_patient_history(self):
+        if not self.patient: return
+        exams = self.db.get_patient_history(self.patient['id'])
+        self.table_history.setRowCount(0)
+        for row, ex in enumerate(exams):
+            self.table_history.insertRow(row)
+            date_str = ex['exam_date'].split(" ")[0]
+            lat = ex.get('laterality', '??')
+            
+            self.table_history.setItem(row, 0, QTableWidgetItem(date_str))
+            
+            item_lat = QTableWidgetItem(lat)
+            if lat == 'OD': item_lat.setForeground(QColor('#d32f2f'))
+            elif lat == 'OG': item_lat.setForeground(QColor('#1976d2'))
+            item_lat.setTextAlignment(Qt.AlignCenter)
+            self.table_history.setItem(row, 1, item_lat)
+            
+            self.table_history.setItem(row, 2, QTableWidgetItem(ex.get('exam_type', 'PLR')))
+            
+            chk = QTableWidgetItem()
+            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chk.setCheckState(Qt.Unchecked)
+            chk.setData(Qt.UserRole, ex)
+            self.table_history.setItem(row, 3, chk)
+
+    def on_history_clicked(self, item):
+        if item.column() != 3: return
+        curves_to_plot = []
+        if self.temp_result_meta:
+            analyzer = PLRAnalyzer()
+            analyzer.load_data(self.temp_result_meta['csv'])
+            analyzer.preprocess()
+            col = '#b71c1c' if self.current_laterality == 'OD' else '#0d47a1'
+            curves_to_plot.append({
+                'label': f'Actuel ({self.current_laterality})',
+                'df': analyzer.data,
+                'metrics': self.temp_result_meta['metrics'],
+                'color': col,
+                'style': '-'
+            })
+        for row in range(self.table_history.rowCount()):
+            chk_item = self.table_history.item(row, 3)
+            if chk_item.checkState() == Qt.Checked:
+                ex_data = chk_item.data(Qt.UserRole)
+                try:
+                    an = PLRAnalyzer()
+                    if an.load_data(ex_data['csv_path']):
+                        an.preprocess()
+                        d_str = ex_data['exam_date'].split(" ")[0]
+                        lat = ex_data.get('laterality', '?')
+                        col = '#ff8a80' if lat == 'OD' else '#82b1ff'
+                        curves_to_plot.append({
+                            'label': f"{d_str} ({lat})",
+                            'df': an.data,
+                            'metrics': ex_data.get('results_data', {}),
+                            'color': col,
+                            'style': '--'
+                        })
+                except: pass
+        self.graph_widget.plot_data(curves_to_plot, clear=True)
+
+    def save_exam(self):
+        if self.temp_result_meta:
+            self.db.save_exam(
+                self.patient['id'],
+                self.current_laterality,
+                self.temp_result_meta['csv'],
+                results=self.temp_result_meta['metrics']
+            )
+            QMessageBox.information(self, "OK", "Examen enregistré.")
+            self.valid_group.setVisible(False)
+            self.load_patient_history()
+            self.status.showMessage("Sauvegardé.")
+
+    def discard_exam(self):
+        if self.temp_result_meta:
+            try: os.remove(self.temp_result_meta['csv'])
+            except: pass
+        self.valid_group.setVisible(False)
+        self.graph_widget.axes.clear()
+        self.graph_widget.canvas.draw()
+        self.status.showMessage("Examen annulé.")
+
+    def _on_settings_requested(self):
+        dialog = SettingsDialog(self, self.conf)
+        dialog.settings_changed.connect(self._apply_settings_live)
+        dialog.exec()
+
+    def _apply_settings_live(self, settings):
         if self.camera_thread and self.camera_thread.camera:
-            # Charger et appliquer la calibration
-            camera_config = self.config_manager.config.get("camera", {})
-            saved_ratio = camera_config.get("mm_per_pixel", 0.05)
-            self.camera_thread.camera.mm_per_pixel = float(saved_ratio)
-            
-            # Initialiser moteur de test
-            self.test_engine = PLRTestEngine(self.camera_thread.camera)
-            
-            # Connexions
-            self.test_engine.phase_changed.connect(self._on_test_phase_changed)
-            self.test_engine.flash_triggered.connect(self._on_flash_triggered)
-            self.test_engine.test_finished.connect(self._on_test_finished)
-            self.test_engine.progress_updated.connect(self._on_test_progress)
-            self.test_engine.error_occurred.connect(lambda e: QMessageBox.warning(self, "Erreur Test", e))
-            
-            print("✅ Moteur PLR initialisé")
-            self.status_bar.showMessage(f"🟢 Prêt (Calibration: {saved_ratio} mm/px)")
+            det = settings.get('detection', {})
+            thresh = int(det.get('canny_threshold1', 50))
+            blur = int(det.get('gaussian_blur', 5))
+            self.camera_thread.set_threshold(thresh)
+            self.camera_thread.set_blur(blur)
+            self.controls.sl_thresh.setValue(thresh)
+            self.controls.sl_blur.setValue(blur)
+            self.status.showMessage("✅ Réglages appliqués")
+
+    def _on_calibration_requested(self):
+        if not self.camera_thread or not self.camera_thread.camera: return
+        dialog = CalibrationDialog(self.camera_thread.camera, self)
+        dialog.calibration_saved.connect(lambda r: self.status.showMessage(f"Calibration : {r:.5f}"))
+        dialog.exec()
+
+    def return_to_home(self):
+        self.stop_camera()
+        self.welcome = WelcomeScreen()
+        def restart_exam(p_data):
+            self.new_window = MainWindow(p_data)
+            self.new_window.show()
+            self.welcome.close()
+        self.welcome.patient_selected.connect(restart_exam)
+        self.welcome.show()
+        self.close()
+
+    def _show_about(self):
+        QMessageBox.about(self, "À propos", "<h3>PLR Vet Analyzer v3.4</h3>")
 
     def stop_camera(self):
         if self.camera_thread:
             self.camera_thread.stop()
 
-    # --- SLOTS UI ---
-    @pyqtSlot(dict)
-    def _on_pupil_detected(self, data):
-        self.control_panel.update_info(diameter=data['diameter_mm'], quality=data['quality_score'])
+    def closeEvent(self, e):
+        self.stop_camera()
+        e.accept()
 
-    def _on_threshold_changed(self, v): 
-        if self.camera_thread: self.camera_thread.set_threshold(v)
-    def _on_blur_changed(self, v): 
-        if self.camera_thread: self.camera_thread.set_blur(v)
-    def _on_display_mode_changed(self, m): 
-        if self.camera_thread: self.camera_thread.set_display_mode(m)
-
-    def _on_settings_requested(self):
-        dialog = SettingsDialog(self, self.config_manager)
-        dialog.settings_changed.connect(self._on_settings_applied)
-        dialog.exec()
-
-    def _on_settings_applied(self, settings):
-        if self.camera_thread:
-            det = settings.get('detection', {})
-            if 'canny_threshold1' in det: self.camera_thread.set_threshold(det['canny_threshold1'])
-            if 'gaussian_blur' in det: self.camera_thread.set_blur(det['gaussian_blur'])
-        self.status_bar.showMessage("✅ Paramètres sauvegardés", 3000)
-
-    def _on_calibration_requested(self):
-        if not self.camera_thread or not self.camera_thread.camera:
-            QMessageBox.critical(self, "Erreur", "La caméra doit être active.")
-            return
-        
-        dialog = CalibrationDialog(self.camera_thread.camera, self)
-        
-        def on_calib_saved(new_ratio):
-            print(f"📏 Nouvelle calibration : {new_ratio:.6f}")
-            self.status_bar.showMessage(f"Calibration mise à jour : {new_ratio:.5f} mm/px", 5000)
-            
-        dialog.calibration_saved.connect(on_calib_saved)
-        dialog.exec()
-
-    # --- LOGIQUE TEST ---
-    def _on_test_requested(self):
-        if not self.test_engine:
-            if self.camera_thread and self.camera_thread.camera: self._init_test_engine()
-            if not self.test_engine:
-                QMessageBox.critical(self, "Erreur", "Moteur de test non initialisé.")
-                return
-        
-        # ID Patient
-        if self.patient_data:
-            patient_ref = f"{self.patient_data['name']}_{self.patient_data['tattoo_id']}"
-        else:
-            patient_ref, ok = QInputDialog.getText(self, "Nouveau Test", "ID Patient :")
-            if not ok: return
-
-        # Configuration Protocole
-        protocol_config = self.config_manager.config.get("protocol", {})
-        self.test_engine.configure(
-            baseline_duration=protocol_config.get("baseline_duration", 2.0),
-            flash_count=protocol_config.get("flash_count", 1),
-            flash_duration_ms=protocol_config.get("flash_duration_ms", 200),
-            response_duration=protocol_config.get("response_duration", 5.0)
-        )
-        
-        self.control_panel.setEnabled(False)
-        self.test_engine.start_test(patient_ref)
-
-    def _on_test_phase_changed(self, phase_name):
-        self.status_bar.showMessage(f"🔬 TEST EN COURS : Phase {phase_name}")
-
-    def _on_flash_triggered(self, active):
-        if active:
-            if not self.flash_overlay: self.flash_overlay = FlashOverlay()
-            self.flash_overlay.showFullScreen()
-            QApplication.processEvents()
-        else:
-            if self.flash_overlay:
-                self.flash_overlay.close()
-                self.flash_overlay = None
-
-    def _on_test_progress(self, elapsed, phase):
-        pass
-
-    def _on_test_finished(self, results_meta):
-        self.control_panel.setEnabled(True)
-        self.status_bar.showMessage("✅ Analyse en cours...")
-        
-        # 1. Analyse
-        analyzer = PLRAnalyzer()
-        if analyzer.load_data(results_meta['csv_path']):
-            analyzer.preprocess()
-            
-            # Paramètres flash pour l'analyse
-            flash_ts = results_meta['flash_timestamp']
-            metrics = analyzer.analyze(flash_timestamp=flash_ts)
-            
-            # Injection infos flash pour visu
-            flash_dur_ms = results_meta['config'].get('flash_duration_ms', 200)
-            metrics['flash_timestamp'] = flash_ts
-            metrics['flash_duration_s'] = flash_dur_ms / 1000.0
-            
-            # 2. Sauvegarde DB
-            if self.patient_data:
-                exam_id = self.db.save_exam(
-                    patient_id=self.patient_data['id'],
-                    csv_path=results_meta['csv_path'],
-                    results=metrics
-                )
-                print(f"💾 Examen sauvegardé ID {exam_id}")
-            
-            # 3. Visu
-            viewer = PLRResultsViewer(self, data=analyzer.data, results=metrics)
-            viewer.exec()
-            self.status_bar.showMessage("Prêt")
-        else:
-            QMessageBox.warning(self, "Erreur", "Analyse impossible (fichier vide ?)")
-
-    def _show_about(self):
-        QMessageBox.about(self, "À propos", "<h3>PLR Vet Analyzer</h3><p>Version 2.0</p>")
-
-    def closeEvent(self, event):
-        reply = QMessageBox.question(self, "Quitter", "Voulez-vous quitter ?", QMessageBox.Yes | QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            self.stop_camera()
-            event.accept()
-        else:
-            event.ignore()
-
-# ===========================
-# POINT D'ENTRÉE
-# ===========================
 def main():
     os.makedirs("data/plr_results", exist_ok=True)
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    
     welcome = WelcomeScreen()
-    
-    def start_app(patient_data):
-        global window 
-        window = MainWindow(patient_data)
-        window.show()
-        # Note: WelcomeScreen se ferme de lui-même
-        
-    welcome.patient_selected.connect(start_app)
+    global win 
+    def launch(p_data):
+        global win
+        win = MainWindow(p_data)
+        win.show()
+    welcome.patient_selected.connect(launch)
     welcome.show()
-    
     sys.exit(app.exec())
 
 if __name__ == "__main__":
