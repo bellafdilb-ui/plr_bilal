@@ -1,33 +1,24 @@
 {
     "protocol": {
         "baseline_duration": 2.0,
-        "flash_count": 1,
         "flash_duration_ms": 1000,
-        "response_duration": 8.0
+        "response_duration": 5.0,
+        "flash_count": 1
     },
     "camera": {
-        "index": 1,
+        "index": 0,
         "width": 640,
-        "height": 480,
-        "fps": 30,
-        "exposure": -6,
-        "gain": 0,
-        "auto_exposure": true
+        "height": 480
     },
     "detection": {
         "canny_threshold1": 50,
-        "canny_threshold2": 150,
-        "min_radius": 20,
-        "max_radius": 100,
-        "dp": 1.2,
-        "min_dist": 50,
-        "param1": 50,
-        "param2": 30,
         "gaussian_blur": 5,
-        "morphology_kernel_size": 5
+        "roi_width": 400,
+        "roi_height": 200,
+        "roi_offset_x": 0,
+        "roi_offset_y": 0
     },
     "recording": {
         "save_path": "recordings"
-    },
-    "advanced": {}
+    }
 }

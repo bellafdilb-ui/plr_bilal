@@ -1,7 +1,7 @@
 """
 welcome_screen.py
 =================
-Interface d'accueil V5 (Avec Latéralité).
+Interface d'accueil V6.2 (Validation Champs Obligatoires).
 """
 
 import sys
@@ -14,10 +14,10 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QGroupBox, QFormLayout, QComboBox, QDateEdit,
     QTextEdit, QMessageBox, QSplitter, QRadioButton, QButtonGroup,
-    QAbstractItemView, QScrollArea, QFrame, QSizePolicy
+    QAbstractItemView, QScrollArea, QFrame
 )
 from PySide6.QtCore import Qt, Signal, QDate
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QColor
 from db_manager import DatabaseManager
 from plr_results_viewer import PLRResultsDialog
 from settings_dialog import SettingsDialog, ConfigManager
@@ -27,7 +27,7 @@ class WelcomeScreen(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PLR Vet - Accueil & Gestion Patients")
+        self.setWindowTitle("PLR Vet - Accueil")
         self.resize(1200, 750)
         self.db = DatabaseManager()
         self.config_manager = ConfigManager()
@@ -89,7 +89,9 @@ class WelcomeScreen(QMainWindow):
         self.grp_identity = QGroupBox("📄 Fiche Patient")
         form = QFormLayout()
         self.inp_name = QLineEdit()
+        self.inp_name.setPlaceholderText("Nom de l'animal *") # Indication visuelle
         self.inp_tattoo = QLineEdit()
+        self.inp_tattoo.setPlaceholderText("Puce / Tatouage *")
         
         h_species = QHBoxLayout()
         self.combo_species = QComboBox()
@@ -118,8 +120,8 @@ class WelcomeScreen(QMainWindow):
         self.txt_notes = QTextEdit()
         self.txt_notes.setMaximumHeight(50)
         
-        form.addRow("Nom:", self.inp_name)
-        form.addRow("ID:", self.inp_tattoo)
+        form.addRow("Nom * :", self.inp_name)
+        form.addRow("ID * :", self.inp_tattoo)
         form.addRow("Espèce:", h_species)
         form.addRow("Sexe:", h_gender)
         form.addRow("Né le:", self.date_dob)
@@ -139,48 +141,27 @@ class WelcomeScreen(QMainWindow):
         self.grp_identity.setLayout(form)
         
         # 2. Historique
-        self.grp_history = QGroupBox("📊 Historique")
+        self.grp_history = QGroupBox("📊 Historique du Patient")
         v_hist = QVBoxLayout()
         self.table_history = QTableWidget()
         self.table_history.setColumnCount(4)
-        self.table_history.setHorizontalHeaderLabels(["Date", "Oeil", "Type", "Voir"]) # Ajout colonne Oeil
+        self.table_history.setHorizontalHeaderLabels(["Date", "Oeil", "Type", "Voir"])
         self.table_history.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table_history.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table_history.setMinimumHeight(150)
+        self.table_history.setMinimumHeight(200)
         v_hist.addWidget(self.table_history)
         self.grp_history.setLayout(v_hist)
         
-        # 3. Action (AVEC LATÉRALITÉ)
-        self.grp_start = QGroupBox("🚀 Nouvel Examen")
+        # 3. Action
+        self.grp_start = QGroupBox("🚀 Action")
         v_start = QVBoxLayout()
         
-        # Choix de l'oeil
-        lbl_eye = QLabel("Sélectionner l'œil à examiner :")
-        lbl_eye.setStyleSheet("font-weight: bold;")
-        h_eyes = QHBoxLayout()
-        self.eye_group = QButtonGroup(right_content)
-        self.rad_od = QRadioButton("Oeil Droit (OD)")
-        self.rad_og = QRadioButton("Oeil Gauche (OG)")
-        self.rad_od.setChecked(True) # Droit par défaut
-        self.eye_group.addButton(self.rad_od)
-        self.eye_group.addButton(self.rad_og)
-        
-        # Style pour différencier
-        self.rad_od.setStyleSheet("color: #d32f2f; font-weight: bold;") # Rouge
-        self.rad_og.setStyleSheet("color: #1976d2; font-weight: bold;") # Bleu
-        
-        h_eyes.addWidget(self.rad_od)
-        h_eyes.addWidget(self.rad_og)
-        h_eyes.addStretch()
-        
-        self.btn_start = QPushButton("DÉMARRER")
-        self.btn_start.setFixedHeight(45)
+        self.btn_start = QPushButton("OUVRIR DOSSIER D'EXAMEN")
+        self.btn_start.setFixedHeight(50)
         self.btn_start.setStyleSheet("background-color: #28a745; color: white; font-weight: bold; font-size: 14px;")
         self.btn_start.clicked.connect(self.start_exam_process)
         self.btn_start.setEnabled(False)
         
-        v_start.addWidget(lbl_eye)
-        v_start.addLayout(h_eyes)
         v_start.addWidget(self.btn_start)
         self.grp_start.setLayout(v_start)
         
@@ -199,20 +180,15 @@ class WelcomeScreen(QMainWindow):
         menu = self.menuBar()
         f_menu = menu.addMenu("Fichier")
         f_menu.addAction("Quitter", self.close, "Ctrl+Q")
-        
         o_menu = menu.addMenu("Options")
-        act_s = QAction("Réglages...", self)
-        act_s.triggered.connect(lambda: SettingsDialog(self, self.config_manager).exec())
-        o_menu.addAction(act_s)
-        
+        o_menu.addAction("Réglages...", lambda: SettingsDialog(self, self.config_manager).exec())
         h_menu = menu.addMenu("Aide")
-        h_menu.addAction("À propos", lambda: QMessageBox.about(self, "About", "PLR Vet V4"))
+        h_menu.addAction("À propos", lambda: QMessageBox.about(self, "About", "PLR Vet"))
 
     def apply_stylesheet(self):
         self.setStyleSheet("""
             QMainWindow { background: #f0f2f5; font-size: 10pt; }
             QGroupBox { background: white; border: 1px solid #ccc; font-weight: bold; margin-top: 10px; }
-            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
             QLineEdit, QComboBox, QDateEdit { padding: 5px; background: #fff; border: 1px solid #ccc; }
             QPushButton { padding: 6px; border-radius: 4px; border: 1px solid #ccc; background: #e2e6ea; }
             QPushButton:hover { background: #dbe2ef; }
@@ -258,9 +234,6 @@ class WelcomeScreen(QMainWindow):
         self.btn_save.setText("💾 Créer Fiche")
         self.btn_delete.setVisible(False)
         self.btn_start.setEnabled(False)
-        self.exam_list_clear()
-
-    def exam_list_clear(self):
         self.table_history.setRowCount(0)
 
     def load_history(self, pid):
@@ -269,43 +242,54 @@ class WelcomeScreen(QMainWindow):
         for row, ex in enumerate(exams):
             self.table_history.insertRow(row)
             d = ex['exam_date'].split(" ")[0]
-            
-            # Affichage Latéralité avec couleur
             lat = ex.get('laterality', '??')
+            
             item_lat = QTableWidgetItem(lat)
             if lat == 'OD': item_lat.setForeground(QColor('#d32f2f'))
             elif lat == 'OG': item_lat.setForeground(QColor('#1976d2'))
             item_lat.setTextAlignment(Qt.AlignCenter)
-            item_lat.setFlags(Qt.ItemIsEnabled)
             
             self.table_history.setItem(row, 0, QTableWidgetItem(d))
             self.table_history.setItem(row, 1, item_lat)
             self.table_history.setItem(row, 2, QTableWidgetItem(ex.get('exam_type', 'PLR')))
-            
             btn = QPushButton("👁️")
             btn.clicked.connect(lambda ch, e=ex: self.view_exam(e))
             self.table_history.setCellWidget(row, 3, btn)
 
     def save_patient(self):
-        # Logique de sauvegarde identique...
+        # 1. RÉCUPÉRATION
         name = self.inp_name.text().strip()
         tattoo = self.inp_tattoo.text().strip()
-        if not name or not tattoo: return
+        
+        # 2. VALIDATION (Message d'erreur)
+        if not name or not tattoo:
+            QMessageBox.warning(self, "Champs manquants", 
+                                "Impossible d'enregistrer.\n\nVeuillez remplir obligatoirement :\n- Le Nom\n- L'Identifiant (Puce/Tatouage)")
+            return
+
         gender = "M" if self.rad_m.isChecked() else "F"
         dob = self.date_dob.date().toString("yyyy-MM-dd")
         
+        # 3. SAUVEGARDE
         if self.current_patient_id is None:
             pid = self.db.add_patient(tattoo, name, self.combo_species.currentText(),
                                     self.inp_breed.text(), gender, dob, notes=self.txt_notes.toPlainText())
-            if pid != -1: self.load_patients()
+            if pid != -1:
+                QMessageBox.information(self, "Succès", "Patient créé avec succès.")
+                self.load_patients()
+                # On recharge pour activer le mode édition
+                self.mode_create_new() 
+            else:
+                QMessageBox.critical(self, "Erreur", "Cet identifiant (Puce/Tatouage) existe déjà !")
         else:
             self.db.update_patient(self.current_patient_id, name, self.combo_species.currentText(),
                                   self.inp_breed.text(), gender, dob, self.txt_notes.toPlainText())
             self.load_patients()
+            QMessageBox.information(self, "Succès", "Fiche mise à jour.")
 
     def delete_patient(self):
         if self.current_patient_id:
-            if QMessageBox.question(self, "Sur ?", "Supprimer ?") == QMessageBox.Yes:
+            if QMessageBox.question(self, "Sur ?", "Voulez-vous vraiment supprimer ce patient et tout son historique ?") == QMessageBox.Yes:
                 self.db.delete_patient(self.current_patient_id)
                 self.load_patients()
                 self.mode_create_new()
@@ -314,9 +298,7 @@ class WelcomeScreen(QMainWindow):
         try:
             df = pd.read_csv(exam['csv_path'])
             results = exam.get('results_data', {})
-            # Titre avec latéralité
-            lat = exam.get('laterality', '')
-            title = f"Examen du {exam['exam_date']} - {lat}"
+            title = f"Examen du {exam['exam_date']} - {exam.get('laterality', '')}"
             d = PLRResultsDialog(self, data=df, results=results, title=title)
             d.exec()
         except: pass
@@ -332,9 +314,7 @@ class WelcomeScreen(QMainWindow):
             'id': self.current_patient_id,
             'name': self.inp_name.text(),
             'tattoo_id': self.inp_tattoo.text(),
-            'species': self.combo_species.currentText(),
-            # AJOUT DE LA LATÉRALITÉ
-            'laterality': 'OD' if self.rad_od.isChecked() else 'OG'
+            'species': self.combo_species.currentText()
         }
         self.patient_selected.emit(p_data)
         self.close()

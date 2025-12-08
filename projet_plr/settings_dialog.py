@@ -1,455 +1,224 @@
 """
-Fenêtre de paramètres pour PLR Analyzer
-Version: 1.3.1 (Fix: Ajout méthode set)
+settings_dialog.py
+==================
+Paramètres (Avec gestion Clinique & Macros).
 """
 
 import json
-import logging
 from pathlib import Path
 from typing import Dict, Any
-
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QTabWidget, QWidget,
-    QLabel, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox,
-    QPushButton, QGroupBox, QLineEdit, QFileDialog, QMessageBox
+    QLabel, QSpinBox, QDoubleSpinBox, QCheckBox, QPushButton, QGroupBox, 
+    QLineEdit, QFileDialog, QListWidget, QTextEdit, QMessageBox
 )
-
 from PySide6.QtCore import Qt, Signal
+from db_manager import DatabaseManager
 
-logger = logging.getLogger(__name__)
-
-
-# =====================================================
-# GESTIONNAIRE DE CONFIGURATION
-# =====================================================
 class ConfigManager:
-    """Gestion du chargement/sauvegarde de la configuration"""
-    
-    def __init__(self, config_path: str = "config/default_config.json"):
+    # (Code inchangé pour la gestion du fichier JSON...)
+    def __init__(self, config_path="config/default_config.json"):
         self.config_path = Path(config_path)
-        self.config: Dict[str, Any] = {}
-        self._ensure_config_exists()
+        self.config = {}
+        self._ensure_exists()
         self.load()
-    
-    def _ensure_config_exists(self):
-        """Crée le fichier de config par défaut s'il n'existe pas"""
+    def _ensure_exists(self):
         if not self.config_path.exists():
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            default_config = {
-                "camera": {
-                    "index": 0,
-                    "width": 640,
-                    "height": 480,
-                    "fps": 30,
-                    "exposure": -6,
-                    "gain": 0,
-                    "auto_exposure": True
-                },
-                "detection": {
-                    "canny_threshold1": 50,
-                    "canny_threshold2": 150,
-                    "min_radius": 20,
-                    "max_radius": 100,
-                    "dp": 1.2,
-                    "min_dist": 50,
-                    "param1": 50,
-                    "param2": 30,
-                    "morphology_kernel_size": 5,
-                    "gaussian_blur": 5
-                },
-                "protocol": {
-                    "baseline_duration": 2.0,
-                    "flash_count": 1,
-                    "flash_duration_ms": 200,
-                    "response_duration": 5.0
-                },
-                "recording": {
-                    "save_path": "recordings",
-                    "image_format": "png",
-                    "auto_save": True,
-                    "max_duration": 300
-                },
-                "advanced": {
-                    "log_level": "INFO",
-                    "enable_performance_monitor": False,
-                    "show_debug_overlay": False,
-                    "thread_priority": "normal"
-                }
-            }
-            self.save(default_config)
-    
-    def load(self) -> Dict[str, Any]:
-        try:
-            with open(self.config_path, 'r', encoding='utf-8') as f:
-                self.config = json.load(f)
-            return self.config
-        except Exception as e:
-            logger.error(f"Erreur chargement config: {e}")
-            return {}
-    
-    def save(self, config: Dict[str, Any] = None):
-        if config:
-            self.config = config
-        try:
-            with open(self.config_path, 'w', encoding='utf-8') as f:
-                json.dump(self.config, f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            logger.error(f"Erreur sauvegarde config: {e}")
-    
-    def get(self, section: str, key: str, default=None):
-        """Récupère une valeur de configuration"""
-        return self.config.get(section, {}).get(key, default)
+            self.save({"camera": {"index": 0, "width": 640, "height": 480}, 
+                       "detection": {"canny_threshold1": 50, "gaussian_blur": 5, "roi_width":400, "roi_height":400},
+                       "protocol": {"baseline_duration": 2.0, "flash_duration_ms": 200},
+                       "recording": {"save_path": "recordings"}})
+    def load(self):
+        try: self.config = json.loads(self.config_path.read_text(encoding='utf-8'))
+        except: pass
+    def save(self, c=None):
+        if c: self.config = c
+        try: self.config_path.write_text(json.dumps(self.config, indent=4), encoding='utf-8')
+        except: pass
+    def get(self, s, k=None, d=None): return self.config.get(s, {}).get(k, d) if k else self.config.get(s, {})
 
-    def set(self, section: str, key: str, value):
-        """Définit une valeur de configuration"""
-        if section not in self.config:
-            self.config[section] = {}
-        self.config[section][key] = value
-
-
-# =====================================================
-# DIALOG PRINCIPAL DES PARAMÈTRES
-# =====================================================
 class SettingsDialog(QDialog):
-    """Fenêtre de paramètres avec onglets"""
-    
     settings_changed = Signal(dict)
 
-    def __init__(self, parent=None, config_manager: ConfigManager = None):
+    def __init__(self, parent=None, config_manager=None):
         super().__init__(parent)
         self.config_manager = config_manager or ConfigManager()
-        self.setWindowTitle("Paramètres - PLR Analyzer")
-        self.setMinimumSize(750, 650)
+        self.db = DatabaseManager()
+        self.setWindowTitle("Paramètres Globaux")
+        self.resize(900, 700)
         self.setup_ui()
-        self.apply_stylesheet()
         self.load_settings()
     
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._create_protocol_tab(), "🧪 Protocole")
-        self.tabs.addTab(self._create_camera_tab(), "📹 Caméra")
-        self.tabs.addTab(self._create_detection_tab(), "🎯 Détection")
-        self.tabs.addTab(self._create_recording_tab(), "💾 Enregistrement")
-        self.tabs.addTab(self._create_advanced_tab(), "⚙️ Avancé")
+        
+        self.tabs.addTab(self._tab_protocol(), "🧪 Protocole")
+        self.tabs.addTab(self._tab_camera(), "📹 Caméra")
+        self.tabs.addTab(self._tab_detection(), "🎯 Détection")
+        self.tabs.addTab(self._tab_clinic(), "🏥 Clinique / PDF")  # NEW
+        self.tabs.addTab(self._tab_macros(), "📝 Commentaires")   # NEW
         
         layout.addWidget(self.tabs)
         
-        # Boutons
-        buttons_layout = QHBoxLayout()
-        self.btn_restore = QPushButton("🔄 Valeurs par défaut")
-        self.btn_restore.clicked.connect(self.restore_defaults)
-        self.btn_cancel = QPushButton("❌ Annuler")
-        self.btn_cancel.clicked.connect(self.reject)
-        self.btn_apply = QPushButton("✅ Appliquer")
-        self.btn_apply.clicked.connect(self.apply_settings)
-        self.btn_ok = QPushButton("💾 OK")
-        self.btn_ok.clicked.connect(self.save_and_close)
-        self.btn_ok.setDefault(True)
-        
-        buttons_layout.addWidget(self.btn_restore)
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(self.btn_cancel)
-        buttons_layout.addWidget(self.btn_apply)
-        buttons_layout.addWidget(self.btn_ok)
-        layout.addLayout(buttons_layout)
+        btns = QHBoxLayout()
+        btn_apply = QPushButton("Appliquer"); btn_apply.clicked.connect(self.apply_settings)
+        btn_ok = QPushButton("OK"); btn_ok.clicked.connect(self.save_and_close)
+        btns.addStretch(); btns.addWidget(btn_apply); btns.addWidget(btn_ok)
+        layout.addLayout(btns)
 
-    def apply_stylesheet(self):
-        self.setStyleSheet("""
-            QDialog, QWidget { background-color: #ffffff; color: #000000; font-size: 10pt; }
-            QGroupBox { font-weight: bold; border: 1px solid #cccccc; border-radius: 5px; margin-top: 10px; padding-top: 15px; }
-            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; color: #333333; }
-            QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox { background-color: #f8f9fa; border: 1px solid #ced4da; padding: 6px; border-radius: 4px; }
-            QPushButton { background-color: #e2e6ea; border: 1px solid #dae0e5; padding: 8px 16px; border-radius: 4px; font-weight: bold; }
-            QPushButton:hover { background-color: #dbe2ef; }
-            QPushButton[text="✅ Appliquer"], QPushButton[text="💾 OK"] { background-color: #007bff; color: white; border: 1px solid #0056b3; }
-            QTabWidget::pane { border: 1px solid #cccccc; background-color: #ffffff; }
-            QTabBar::tab { background: #f1f3f5; color: #495057; padding: 10px 15px; border: 1px solid #dee2e6; }
-            QTabBar::tab:selected { background: #ffffff; color: #007bff; border-bottom: 2px solid #007bff; font-weight: bold; }
-        """)
-
-    # --- NOUVEL ONGLET PROTOCOLE ---
-    def _create_protocol_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        group = QGroupBox("Configuration du Test PLR")
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        
+    # --- ONGLETS EXISTANTS ---
+    def _tab_protocol(self):
+        w = QWidget(); l = QFormLayout(w)
         self.spin_baseline = QDoubleSpinBox()
-        self.spin_baseline.setRange(0.5, 30.0)
-        self.spin_baseline.setSingleStep(0.5)
-        self.spin_baseline.setSuffix(" s")
-        form.addRow("Durée Baseline (Repos):", self.spin_baseline)
-        
-        self.spin_flash_count = QSpinBox()
-        self.spin_flash_count.setRange(1, 10)
-        self.spin_flash_count.setSuffix(" flash(s)")
-        form.addRow("Nombre de Flashs:", self.spin_flash_count)
-        
-        self.spin_flash_duration = QSpinBox()
-        self.spin_flash_duration.setRange(10, 5000)
-        self.spin_flash_duration.setSingleStep(10)
-        self.spin_flash_duration.setSuffix(" ms")
-        form.addRow("Durée du Flash:", self.spin_flash_duration)
-        
-        self.spin_response = QDoubleSpinBox()
-        self.spin_response.setRange(1.0, 60.0)
-        self.spin_response.setSingleStep(0.5)
-        self.spin_response.setSuffix(" s")
-        form.addRow("Durée Réponse (par cycle):", self.spin_response)
-        
-        group.setLayout(form)
-        layout.addWidget(group)
-        
-        info_label = QLabel("Le test suivra la séquence : Baseline ➔ [Flash ➔ Réponse] x N")
-        info_label.setStyleSheet("color: #666; font-style: italic; margin-top: 10px;")
-        layout.addWidget(info_label)
-        
-        layout.addStretch()
-        return widget
+        self.spin_flash_dur = QSpinBox(); self.spin_flash_dur.setRange(10,5000)
+        l.addRow("Baseline (s):", self.spin_baseline)
+        l.addRow("Durée Flash (ms):", self.spin_flash_dur)
+        return w
 
-    # --- AUTRES ONGLETS ---
-    def _create_camera_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        group_sel = QGroupBox("Caméra")
-        form_sel = QFormLayout()
-        self.spin_camera_index = QSpinBox()
-        form_sel.addRow("Index:", self.spin_camera_index)
-        group_sel.setLayout(form_sel)
-        layout.addWidget(group_sel)
-        
-        group_res = QGroupBox("Image")
-        form_res = QFormLayout()
-        self.spin_width = QSpinBox()
-        self.spin_width.setRange(320, 3840)
-        self.spin_width.setSingleStep(160)
-        self.spin_height = QSpinBox()
-        self.spin_height.setRange(240, 2160)
-        self.spin_height.setSingleStep(120)
-        self.spin_fps = QSpinBox()
-        form_res.addRow("Largeur:", self.spin_width)
-        form_res.addRow("Hauteur:", self.spin_height)
-        form_res.addRow("FPS:", self.spin_fps)
-        group_res.setLayout(form_res)
-        layout.addWidget(group_res)
-        
-        group_exp = QGroupBox("Exposition")
-        form_exp = QFormLayout()
-        self.check_auto_exposure = QCheckBox("Auto")
-        self.spin_exposure = QSpinBox()
-        self.spin_exposure.setRange(-15, 0)
-        self.spin_gain = QSpinBox()
-        form_exp.addRow("Mode Auto:", self.check_auto_exposure)
-        form_exp.addRow("Exposition:", self.spin_exposure)
-        form_exp.addRow("Gain:", self.spin_gain)
-        group_exp.setLayout(form_exp)
-        layout.addWidget(group_exp)
-        
-        self.check_auto_exposure.toggled.connect(lambda c: [self.spin_exposure.setEnabled(not c), self.spin_gain.setEnabled(not c)])
-        layout.addStretch()
-        return widget
+    def _tab_camera(self):
+        w = QWidget(); l = QFormLayout(w)
+        self.spin_idx = QSpinBox()
+        l.addRow("Index Caméra:", self.spin_idx)
+        return w
 
-    def _create_detection_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
+    def _tab_detection(self):
+        w = QWidget(); l = QFormLayout(w)
+        self.spin_canny = QSpinBox(); self.spin_canny.setRange(0, 255)
+        self.spin_blur = QSpinBox(); self.spin_blur.setRange(1, 31); self.spin_blur.setSingleStep(2)
+        self.spin_rw = QSpinBox(); self.spin_rw.setRange(50, 4000)
+        self.spin_rh = QSpinBox(); self.spin_rh.setRange(50, 4000)
+        self.spin_offx = QSpinBox(); self.spin_offx.setRange(-2000, 2000)
+        self.spin_offy = QSpinBox(); self.spin_offy.setRange(-2000, 2000)
         
-        group_canny = QGroupBox("Canny (Contours)")
-        form_canny = QFormLayout()
-        self.spin_canny_low = QSpinBox()
-        self.spin_canny_low.setRange(1, 255)
-        self.spin_canny_high = QSpinBox()
-        self.spin_canny_high.setRange(1, 255)
-        form_canny.addRow("Seuil Bas:", self.spin_canny_low)
-        form_canny.addRow("Seuil Haut:", self.spin_canny_high)
-        group_canny.setLayout(form_canny)
-        layout.addWidget(group_canny)
-        
-        group_hough = QGroupBox("Hough (Cercles)")
-        form_hough = QFormLayout()
-        self.spin_min_radius = QSpinBox()
-        self.spin_max_radius = QSpinBox()
-        self.spin_max_radius.setRange(10, 500)
-        self.spin_dp = QDoubleSpinBox()
-        self.spin_min_dist = QSpinBox()
-        self.spin_param1 = QSpinBox()
-        self.spin_param1.setRange(1, 300)
-        self.spin_param2 = QSpinBox()
-        form_hough.addRow("Rayon Min:", self.spin_min_radius)
-        form_hough.addRow("Rayon Max:", self.spin_max_radius)
-        form_hough.addRow("DP:", self.spin_dp)
-        form_hough.addRow("Dist Min:", self.spin_min_dist)
-        form_hough.addRow("Param1:", self.spin_param1)
-        form_hough.addRow("Param2:", self.spin_param2)
-        group_hough.setLayout(form_hough)
-        layout.addWidget(group_hough)
-        
-        group_pre = QGroupBox("Prétraitement")
-        form_pre = QFormLayout()
-        self.spin_gaussian = QSpinBox()
-        self.spin_morphology = QSpinBox()
-        form_pre.addRow("Flou:", self.spin_gaussian)
-        form_pre.addRow("Morpho:", self.spin_morphology)
-        group_pre.setLayout(form_pre)
-        layout.addWidget(group_pre)
-        
-        layout.addStretch()
-        return widget
+        l.addRow("Seuil Canny:", self.spin_canny)
+        l.addRow("Flou Gaussien:", self.spin_blur)
+        l.addRow("Largeur ROI:", self.spin_rw)
+        l.addRow("Hauteur ROI:", self.spin_rh)
+        l.addRow("Offset X:", self.spin_offx)
+        l.addRow("Offset Y:", self.spin_offy)
+        return w
 
-    def _create_recording_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
+    # --- NOUVEAUX ONGLETS ---
+    def _tab_clinic(self):
+        w = QWidget(); l = QFormLayout(w)
+        self.inp_clin_name = QLineEdit()
+        self.inp_clin_addr = QLineEdit()
+        self.inp_clin_doc = QLineEdit()
+        self.inp_clin_phone = QLineEdit()
+        self.inp_clin_logo = QLineEdit()
+        btn_logo = QPushButton("Choisir Logo..."); btn_logo.clicked.connect(self._pick_logo)
         
-        group = QGroupBox("Sauvegarde")
-        form = QFormLayout()
-        self.edit_save_path = QLineEdit()
-        btn = QPushButton("...")
-        btn.clicked.connect(self.browse_save_path)
+        l.addRow("Nom Clinique:", self.inp_clin_name)
+        l.addRow("Adresse:", self.inp_clin_addr)
+        l.addRow("Téléphone:", self.inp_clin_phone)
+        l.addRow("Praticien:", self.inp_clin_doc)
+        
         h = QHBoxLayout()
-        h.addWidget(self.edit_save_path)
-        h.addWidget(btn)
-        
-        self.combo_image_format = QComboBox()
-        self.combo_image_format.addItems(["png", "jpg"])
-        self.check_auto_save = QCheckBox("Auto-Save")
-        self.spin_max_duration = QSpinBox()
-        self.spin_max_duration.setRange(10, 3600)
-        
-        layout.addWidget(group)
-        group.setLayout(QVBoxLayout())
-        group.layout().addLayout(h)
-        group.layout().addWidget(QLabel("Format:"))
-        group.layout().addWidget(self.combo_image_format)
-        group.layout().addWidget(self.check_auto_save)
-        group.layout().addWidget(QLabel("Durée Max (s):"))
-        group.layout().addWidget(self.spin_max_duration)
-        
-        layout.addStretch()
-        return widget
+        h.addWidget(self.inp_clin_logo); h.addWidget(btn_logo)
+        l.addRow("Logo (Image):", h)
+        return w
 
-    def _create_advanced_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        group = QGroupBox("Debug")
-        form = QFormLayout()
-        self.combo_log_level = QComboBox()
-        self.combo_log_level.addItems(["INFO", "DEBUG"])
-        self.check_performance = QCheckBox("Perf Monitor")
-        self.check_debug_overlay = QCheckBox("Overlay Debug")
-        self.combo_thread_priority = QComboBox()
-        self.combo_thread_priority.addItems(["normal", "high"])
-        
-        form.addRow("Logs:", self.combo_log_level)
-        form.addRow("Priorité:", self.combo_thread_priority)
-        form.addRow(self.check_performance)
-        form.addRow(self.check_debug_overlay)
-        group.setLayout(form)
-        layout.addWidget(group)
-        layout.addStretch()
-        return widget
+    def _pick_logo(self):
+        f, _ = QFileDialog.getOpenFileName(self, "Logo", "", "Images (*.png *.jpg)")
+        if f: self.inp_clin_logo.setText(f)
 
-    # --- LOGIQUE ---
+    def _tab_macros(self):
+        w = QWidget(); l = QVBoxLayout(w)
+        
+        h_add = QHBoxLayout()
+        self.inp_macro_title = QLineEdit(); self.inp_macro_title.setPlaceholderText("Titre (ex: Normal)")
+        self.inp_macro_content = QLineEdit(); self.inp_macro_content.setPlaceholderText("Texte (ex: Réflexe vif et symétrique, pas d'anomalie)")
+        btn_add = QPushButton("Ajouter"); btn_add.clicked.connect(self._add_macro)
+        h_add.addWidget(self.inp_macro_title); h_add.addWidget(self.inp_macro_content); h_add.addWidget(btn_add)
+        
+        self.list_macros = QListWidget()
+        btn_del = QPushButton("Supprimer Sélection"); btn_del.clicked.connect(self._del_macro)
+        
+        l.addLayout(h_add)
+        l.addWidget(self.list_macros)
+        l.addWidget(btn_del)
+        
+        # Charger liste
+        self._refresh_macros()
+        return w
+
+    def _refresh_macros(self):
+        self.list_macros.clear()
+        macros = self.db.get_macros()
+        for m in macros:
+            self.list_macros.addItem(f"{m['id']} : {m['title']} - {m['content']}")
+
+    def _add_macro(self):
+        t, c = self.inp_macro_title.text(), self.inp_macro_content.text()
+        if t and c:
+            self.db.add_macro(t, c)
+            self._refresh_macros()
+            self.inp_macro_title.clear(); self.inp_macro_content.clear()
+
+    def _del_macro(self):
+        item = self.list_macros.currentItem()
+        if item:
+            mid = int(item.text().split(" : ")[0])
+            self.db.delete_macro(mid)
+            self._refresh_macros()
+
     def load_settings(self):
-        conf = self.config_manager.config
+        # JSON
+        c = self.config_manager.config
+        p = c.get("protocol", {})
+        self.spin_baseline.setValue(p.get("baseline_duration", 2.0))
+        self.spin_flash_dur.setValue(p.get("flash_duration_ms", 200))
         
-        # Protocol
-        prot = conf.get("protocol", {})
-        self.spin_baseline.setValue(prot.get("baseline_duration", 2.0))
-        self.spin_flash_count.setValue(prot.get("flash_count", 1))
-        self.spin_flash_duration.setValue(prot.get("flash_duration_ms", 200))
-        self.spin_response.setValue(prot.get("response_duration", 5.0))
+        cm = c.get("camera", {})
+        self.spin_idx.setValue(cm.get("index", 0))
         
-        # Camera
-        cam = conf.get("camera", {})
-        self.spin_camera_index.setValue(cam.get("index", 0))
-        self.spin_width.setValue(cam.get("width", 640))
-        self.spin_height.setValue(cam.get("height", 480))
-        self.spin_fps.setValue(cam.get("fps", 30))
-        self.spin_exposure.setValue(cam.get("exposure", -6))
-        self.spin_gain.setValue(cam.get("gain", 0))
-        self.check_auto_exposure.setChecked(cam.get("auto_exposure", True))
+        d = c.get("detection", {})
+        self.spin_canny.setValue(d.get("canny_threshold1", 50))
+        self.spin_blur.setValue(d.get("gaussian_blur", 5))
+        self.spin_rw.setValue(d.get("roi_width", 400))
+        self.spin_rh.setValue(d.get("roi_height", 400))
+        self.spin_offx.setValue(d.get("roi_offset_x", 0))
+        self.spin_offy.setValue(d.get("roi_offset_y", 0))
         
-        # Detection
-        det = conf.get("detection", {})
-        self.spin_canny_low.setValue(det.get("canny_threshold1", 50))
-        self.spin_canny_high.setValue(det.get("canny_threshold2", 150))
-        self.spin_min_radius.setValue(det.get("min_radius", 20))
-        self.spin_max_radius.setValue(det.get("max_radius", 100))
-        self.spin_dp.setValue(det.get("dp", 1.2))
-        self.spin_min_dist.setValue(det.get("min_dist", 50))
-        self.spin_param1.setValue(det.get("param1", 50))
-        self.spin_param2.setValue(det.get("param2", 30))
-        self.spin_gaussian.setValue(det.get("gaussian_blur", 5))
-        self.spin_morphology.setValue(det.get("morphology_kernel_size", 5))
-        
-        # Rec / Adv
-        self.edit_save_path.setText(conf.get("recording", {}).get("save_path", "recordings"))
+        # SQL (Clinique)
+        info = self.db.get_clinic_info()
+        self.inp_clin_name.setText(info.get('name', ''))
+        self.inp_clin_addr.setText(info.get('address', ''))
+        self.inp_clin_doc.setText(info.get('doctor_name', ''))
+        self.inp_clin_phone.setText(info.get('phone', ''))
+        self.inp_clin_logo.setText(info.get('logo_path', ''))
 
-    def get_settings(self) -> Dict[str, Any]:
+    def get_settings(self):
         return {
             "protocol": {
                 "baseline_duration": self.spin_baseline.value(),
-                "flash_count": self.spin_flash_count.value(),
-                "flash_duration_ms": self.spin_flash_duration.value(),
-                "response_duration": self.spin_response.value()
+                "flash_duration_ms": self.spin_flash_dur.value(),
+                "response_duration": 5.0, "flash_count": 1
             },
-            "camera": {
-                "index": self.spin_camera_index.value(),
-                "width": self.spin_width.value(),
-                "height": self.spin_height.value(),
-                "fps": self.spin_fps.value(),
-                "exposure": self.spin_exposure.value(),
-                "gain": self.spin_gain.value(),
-                "auto_exposure": self.check_auto_exposure.isChecked()
-            },
+            "camera": {"index": self.spin_idx.value(), "width": 640, "height": 480},
             "detection": {
-                "canny_threshold1": self.spin_canny_low.value(),
-                "canny_threshold2": self.spin_canny_high.value(),
-                "min_radius": self.spin_min_radius.value(),
-                "max_radius": self.spin_max_radius.value(),
-                "dp": self.spin_dp.value(),
-                "min_dist": self.spin_min_dist.value(),
-                "param1": self.spin_param1.value(),
-                "param2": self.spin_param2.value(),
-                "gaussian_blur": self.spin_gaussian.value(),
-                "morphology_kernel_size": self.spin_morphology.value()
+                "canny_threshold1": self.spin_canny.value(),
+                "gaussian_blur": self.spin_blur.value(),
+                "roi_width": self.spin_rw.value(),
+                "roi_height": self.spin_rh.value(),
+                "roi_offset_x": self.spin_offx.value(),
+                "roi_offset_y": self.spin_offy.value()
             },
-            "recording": {
-                "save_path": self.edit_save_path.text()
-            },
-            "advanced": {}
+            "recording": {"save_path": "recordings"}
         }
 
     def apply_settings(self):
         self.settings_changed.emit(self.get_settings())
-    
+        # Save SQL
+        self.db.set_clinic_info(
+            self.inp_clin_name.text(), self.inp_clin_addr.text(),
+            self.inp_clin_phone.text(), "", self.inp_clin_doc.text(),
+            self.inp_clin_logo.text()
+        )
+
     def save_and_close(self):
-        s = self.get_settings()
-        self.config_manager.save(s)
-        self.settings_changed.emit(s)
+        self.apply_settings()
+        self.config_manager.save(self.get_settings())
         self.accept()
-        
-    def restore_defaults(self):
-        if self.config_manager.config_path.exists():
-            self.config_manager.config_path.unlink()
-        self.config_manager._ensure_config_exists()
-        self.config_manager.load()
-        self.load_settings()
-
-    def browse_save_path(self):
-        d = QFileDialog.getExistingDirectory(self, "Dossier", self.edit_save_path.text())
-        if d: self.edit_save_path.setText(d)
-
-if __name__ == "__main__":
-    import sys
-    from PySide6.QtWidgets import QApplication
-    app = QApplication(sys.argv)
-    app.setStyle("Fusion")
-    d = SettingsDialog()
-    d.settings_changed.connect(lambda s: print(json.dumps(s, indent=2)))
-    d.show()
-    sys.exit(app.exec())
