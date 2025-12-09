@@ -1,0 +1,16 @@
+Gardez ces commandes sous le coude pour le jour où vous voudrez mettre à jour les traductions :
+
+1. Mettre à jour le fichier de travail (.ts) : (À faire quand vous avez ajouté du nouveau code)
+
+Python
+
+# Via le script Python :
+import sys; from pathlib import Path; lup = next(Path(sys.prefix).rglob("lupdate.exe")); print(f'& "{lup}" main_application.py welcome_screen.py settings_dialog.py camera_engine.py plr_results_viewer.py -ts translations/app_en.ts')
+2. Traduire : Ouvrir Qt Linguist et charger translations/app_en.ts.
+
+3. Compiler le fichier final (.qm) : (À faire pour voir le résultat dans le logiciel)
+
+Python
+
+# Via le script Python :
+import sys; from pathlib import Path; lrel = next(Path(sys.prefix).rglob("lrelease.

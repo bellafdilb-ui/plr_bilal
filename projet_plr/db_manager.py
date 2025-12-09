@@ -1,7 +1,7 @@
 """
 db_manager.py
 =============
-Gestionnaire BDD V2 (Support Clinique & Macros).
+Gestionnaire BDD V3 (Macros simplifiées : Pas de titre).
 """
 
 import sqlite3
@@ -25,7 +25,6 @@ class DatabaseManager:
         conn = self._get_connection()
         cursor = conn.cursor()
         
-        # Tables existantes
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS patients (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,9 +56,6 @@ class DatabaseManager:
             )
         """)
 
-        # --- NOUVELLES TABLES ---
-        
-        # 1. Infos Clinique (Une seule ligne prévue)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS clinic_info (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -72,11 +68,10 @@ class DatabaseManager:
             )
         """)
         
-        # 2. Macros (Commentaires prédéfinis)
+        # --- MODIFICATION ICI : PLUS DE TITRE ---
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS macros (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT,
                 content TEXT
             )
         """)
@@ -93,7 +88,7 @@ class DatabaseManager:
         salt = "VET_APP_v1"
         return hashlib.sha256(f"{unique_id}{salt}".encode()).hexdigest()
 
-    # --- PATIENTS & EXAMS (Méthodes inchangées, je les résume pour gain de place) ---
+    # --- PATIENTS & EXAMS ---
     def add_patient(self, tattoo_id, name, species, breed="", gender="", birth_date="", owner_name="", notes=""):
         try:
             conn = self._get_connection(); cursor = conn.cursor()
@@ -130,6 +125,26 @@ class DatabaseManager:
                            (pid, lat, str(csv), str(vid), js, comments))
             eid = cursor.lastrowid; conn.commit(); conn.close(); return eid
         except: return -1
+    
+    def delete_exam(self, exam_id: int) -> bool:
+        """Supprime un examen spécifique."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM exams WHERE id = ?", (exam_id,))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            logger.error(f"Erreur delete exam: {e}")
+            return False
+
+    def update_exam_comment(self, exam_id: int, new_comment: str) -> bool:
+        try:
+            conn = self._get_connection(); cursor = conn.cursor()
+            cursor.execute("UPDATE exams SET comments = ? WHERE id = ?", (new_comment, exam_id))
+            conn.commit(); conn.close(); return True
+        except Exception as e: logger.error(f"Err upd com: {e}"); return False
 
     def get_patient_history(self, pid):
         conn = self._get_connection(); cursor = conn.cursor()
@@ -142,22 +157,7 @@ class DatabaseManager:
             hist.append(d)
         conn.close(); return hist
 
-    def update_exam_comment(self, exam_id: int, new_comment: str) -> bool:
-            """Met à jour le commentaire d'un examen existant."""
-            try:
-                conn = self._get_connection()
-                cursor = conn.cursor()
-                cursor.execute("UPDATE exams SET comments = ? WHERE id = ?", (new_comment, exam_id))
-                conn.commit()
-                conn.close()
-                return True
-            except Exception as e:
-                logger.error(f"Erreur update comment: {e}")
-                return False
-
-
-    # --- GESTION CLINIQUE & MACROS ---
-
+    # --- CLINIQUE ---
     def set_clinic_info(self, name, addr, phone, email, doc, logo):
         conn = self._get_connection(); cursor = conn.cursor()
         cursor.execute("INSERT OR REPLACE INTO clinic_info (id, name, address, phone, email, doctor_name, logo_path) VALUES (1, ?, ?, ?, ?, ?, ?)",
@@ -171,9 +171,12 @@ class DatabaseManager:
         conn.close()
         return dict(row) if row else {}
 
-    def add_macro(self, title, content):
+    # --- MACROS SIMPLIFIÉES ---
+    def add_macro(self, content):
+        """Ajoute une macro sans titre."""
         conn = self._get_connection(); cursor = conn.cursor()
-        cursor.execute("INSERT INTO macros (title, content) VALUES (?, ?)", (title, content))
+        # On insère uniquement le contenu
+        cursor.execute("INSERT INTO macros (content) VALUES (?)", (content,))
         conn.commit(); conn.close()
 
     def delete_macro(self, mid):

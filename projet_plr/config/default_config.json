@@ -1,8 +1,11 @@
 {
+    "general": {
+        "language": "fr"
+    },
     "protocol": {
-        "baseline_duration": 2.0,
+        "baseline_duration": 1.0,
         "flash_duration_ms": 1000,
-        "response_duration": 5.0,
+        "response_duration": 6.0,
         "flash_count": 1
     },
     "camera": {
@@ -11,7 +14,7 @@
         "height": 480
     },
     "detection": {
-        "canny_threshold1": 50,
+        "canny_threshold1": 37,
         "gaussian_blur": 5,
         "roi_width": 400,
         "roi_height": 200,

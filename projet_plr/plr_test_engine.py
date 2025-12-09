@@ -1,166 +1,118 @@
 """
 plr_test_engine.py
 ==================
-Moteur d'orchestration des tests PLR (Pupillary Light Reflex).
-Version: 1.1.0 (Multi-Flash Support)
+Moteur de test PLR V2 (Support Flash en Secondes).
 """
 
 import time
 import logging
-from enum import Enum
-from pathlib import Path
-from datetime import datetime
-
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QObject, Signal
 
 logger = logging.getLogger(__name__)
 
-class TestPhase(Enum):
-    """Phases du protocole PLR."""
-    IDLE = "Prêt"
-    BASELINE = "Baseline"
-    FLASH = "Stimulation"
-    RESPONSE = "Réponse"
-    FINISHED = "Terminé"
-
 class PLRTestEngine(QObject):
-    """
-    Orchestrateur de test PLR.
-    Supporte les protocoles multi-flash.
-    """
-    
-    # Signaux
-    test_started = Signal()
-    test_finished = Signal(dict)
-    test_aborted = Signal()
-    phase_changed = Signal(str)
-    flash_triggered = Signal(bool)
-    progress_updated = Signal(float, str)
-    error_occurred = Signal(str)
+    flash_triggered = Signal(bool)  
+    test_finished = Signal(dict)    
+    progress_updated = Signal(float, str) 
 
     def __init__(self, camera_engine):
         super().__init__()
         self.camera = camera_engine
+        self.is_running = False
         
-        # Configuration par défaut
-        self.config = {
-            "baseline_duration": 2.0,
-            "flash_count": 1,
-            "flash_duration_ms": 200,
-            "response_duration": 5.0
-        }
+        # Configuration par défaut (en secondes)
+        self.baseline_duration = 2.0
+        self.flash_count = 1
+        self.flash_duration_s = 0.2 # 200ms
+        self.response_duration = 5.0
+        self.ref_name = "test"
+
+    def configure(self, baseline_duration=2.0, flash_count=1, flash_duration_ms=200, response_duration=5.0):
+        """Configure le protocole."""
+        self.baseline_duration = baseline_duration
+        self.flash_count = flash_count
+        # Conversion ms -> s pour cohérence interne
+        self.flash_duration_s = flash_duration_ms / 1000.0
+        self.response_duration = response_duration
         
-        self.current_phase = TestPhase.IDLE
-        self.start_time = 0.0
-        self.phase_start_time = 0.0
-        self.flash_timestamp = 0.0
-        self.current_flash_idx = 0  # Compteur de flashs
-        self.csv_path = ""
+        logger.info(f"Protocole : Base={self.baseline_duration}s, Flash={self.flash_duration_s}s, Tot={self.baseline_duration+self.flash_duration_s+self.response_duration}s")
+
+    def start_test(self, reference_name):
+        self.ref_name = reference_name
+        self.is_running = True
         
-        self.timer = QTimer()
-        self.timer.setInterval(20)  # 50 Hz
-        self.timer.timeout.connect(self._update_loop)
-
-    def configure(self, baseline_duration=2.0, flash_count=1, flash_duration_ms=200, response_duration=5.0, **kwargs):
-        """Met à jour le protocole."""
-        self.config["baseline_duration"] = float(baseline_duration)
-        self.config["flash_count"] = int(flash_count)
-        self.config["flash_duration_ms"] = int(flash_duration_ms)
-        self.config["response_duration"] = float(response_duration)
-        logger.info(f"Protocole configuré : {self.config}")
-
-    def start_test(self, patient_id: str = "Test"):
-        if not self.camera or not self.camera.is_ready():
-            self.error_occurred.emit("Caméra non prête.")
-            return
-
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"PLR_{patient_id}_{timestamp}.csv"
-            output_dir = Path("data/plr_results")
-            output_dir.mkdir(parents=True, exist_ok=True)
-            self.csv_path = str(output_dir / filename)
-            
-            logger.info("Démarrage enregistrement...")
-            self.camera.start_csv_recording(self.csv_path)
-            
-            # Reset
-            self.start_time = time.time()
-            self.current_flash_idx = 0
-            self._set_phase(TestPhase.BASELINE)
-            
-            self.timer.start()
-            self.test_started.emit()
-            
-        except Exception as e:
-            logger.error(f"Erreur démarrage: {e}")
-            self.error_occurred.emit(str(e))
-            self.abort_test()
+        # Exécution dans un thread séparé pour ne pas geler l'UI
+        import threading
+        t = threading.Thread(target=self._run_sequence)
+        t.daemon = True
+        t.start()
 
     def stop_test(self):
-        self.timer.stop()
+        self.is_running = False
         if self.camera:
             self.camera.stop_csv_recording()
-        
-        self._set_phase(TestPhase.FINISHED)
-        self.flash_triggered.emit(False)
-        
-        result_meta = {
-            "csv_path": self.csv_path,
-            "flash_timestamp": self.flash_timestamp,
-            "duration": time.time() - self.start_time,
-            "config": self.config
-        }
-        
-        self.test_finished.emit(result_meta)
-        QTimer.singleShot(2000, lambda: self._set_phase(TestPhase.IDLE))
 
-    def abort_test(self):
-        self.timer.stop()
-        if self.camera:
-            self.camera.stop_csv_recording()
-        self._set_phase(TestPhase.IDLE)
-        self.flash_triggered.emit(False)
-        self.test_aborted.emit()
+    def _run_sequence(self):
+        try:
+            if not self.camera or not self.camera.is_ready():
+                logger.error("Caméra non prête")
+                return
 
-    def _set_phase(self, phase: TestPhase):
-        self.current_phase = phase
-        self.phase_start_time = time.time()
-        self.phase_changed.emit(phase.value)
+            # 1. Préparation Fichier
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"data/plr_results/{timestamp}_{self.ref_name}.csv"
+            
+            logger.info("Démarrage enregistrement...")
+            self.camera.start_csv_recording(filename)
+            
+            start_time = time.time()
+            
+            # 2. Boucle des Flashs
+            for i in range(self.flash_count):
+                if not self.is_running: break
+                
+                # PHASE BASELINE
+                self.progress_updated.emit(0, "Baseline")
+                phase_end = time.time() + self.baseline_duration
+                while time.time() < phase_end and self.is_running:
+                    elapsed = time.time() - start_time
+                    self.progress_updated.emit(elapsed, "Baseline")
+                    time.sleep(0.05)
 
-    def _update_loop(self):
-        current = time.time()
-        elapsed_total = current - self.start_time
-        elapsed_phase = current - self.phase_start_time
-        
-        self.progress_updated.emit(elapsed_total, self.current_phase.value)
-        
-        # Machine à états
-        if self.current_phase == TestPhase.BASELINE:
-            if elapsed_phase >= self.config["baseline_duration"]:
-                # Fin Baseline -> Premier Flash
-                self.current_flash_idx = 1
-                self._set_phase(TestPhase.FLASH)
-                self.flash_triggered.emit(True)
-                # On note le timestamp du PREMIER flash pour l'analyse
-                if self.current_flash_idx == 1:
-                    self.flash_timestamp = elapsed_total
+                # PHASE FLASH
+                flash_ts = time.time() - self.camera.start_time # Temps relatif pour l'analyse
+                self.flash_triggered.emit(True) # Flash ON
+                
+                phase_end = time.time() + self.flash_duration_s
+                while time.time() < phase_end and self.is_running:
+                    elapsed = time.time() - start_time
+                    self.progress_updated.emit(elapsed, "FLASH")
+                    time.sleep(0.01) # Boucle rapide
+                
+                self.flash_triggered.emit(False) # Flash OFF
 
-        elif self.current_phase == TestPhase.FLASH:
-            # Durée flash en secondes (ms / 1000)
-            duration_s = self.config["flash_duration_ms"] / 1000.0
-            if elapsed_phase >= duration_s:
-                self.flash_triggered.emit(False)
-                self._set_phase(TestPhase.RESPONSE)
+                # PHASE REPONSE
+                phase_end = time.time() + self.response_duration
+                while time.time() < phase_end and self.is_running:
+                    elapsed = time.time() - start_time
+                    self.progress_updated.emit(elapsed, "Réponse")
+                    time.sleep(0.05)
 
-        elif self.current_phase == TestPhase.RESPONSE:
-            if elapsed_phase >= self.config["response_duration"]:
-                # Fin d'un cycle Réponse
-                if self.current_flash_idx < self.config["flash_count"]:
-                    # Encore des flashs à faire -> Retour FLASH
-                    self.current_flash_idx += 1
-                    self._set_phase(TestPhase.FLASH)
-                    self.flash_triggered.emit(True)
-                else:
-                    # Tous les flashs faits -> FIN
-                    self.stop_test()
+            # 3. Fin
+            self.stop_test()
+            
+            # Métadonnées pour l'analyseur
+            meta = {
+                'csv_path': filename,
+                'flash_timestamp': flash_ts,
+                'config': {
+                    'baseline_duration': self.baseline_duration,
+                    'flash_duration_ms': self.flash_duration_s * 1000,
+                    'response_duration': self.response_duration
+                }
+            }
+            self.test_finished.emit(meta)
+
+        except Exception as e:
+            logger.error(f"Erreur sequence: {e}")
+            self.stop_test()
