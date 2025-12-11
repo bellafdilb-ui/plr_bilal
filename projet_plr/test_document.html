@@ -1,0 +1,369 @@
+
+import React, { useRef, useMemo } from 'react';
+import { createRoot } from 'react-dom/client';
+
+// Contenu complet du Guide Utilisateur au format HTML autonome
+const USER_GUIDE_HTML = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Guide Utilisateur - PLR Vet</title>
+<style>
+  body { 
+    font-family: 'Segoe UI', Arial, Helvetica, sans-serif; 
+    line-height: 1.6; 
+    color: #333; 
+    max-width: 800px; 
+    margin: 0 auto; 
+    padding: 40px; 
+    background: #fff;
+  }
+  h1 { 
+    text-align: center; 
+    color: #2c3e50; 
+    border-bottom: 3px solid #3498db; 
+    padding-bottom: 20px; 
+    margin-bottom: 30px;
+  }
+  h2 { 
+    color: #2980b9; 
+    margin-top: 40px; 
+    border-bottom: 1px solid #eee; 
+    padding-bottom: 10px; 
+  }
+  h3 { 
+    color: #16a085; 
+    margin-top: 25px; 
+    font-weight: 600;
+  }
+  .toc { 
+    background: #f8f9fa; 
+    padding: 25px; 
+    border-left: 5px solid #3498db; 
+    margin-bottom: 40px; 
+  }
+  .toc h2 { margin-top: 0; font-size: 1.4em; border: none; }
+  .toc ul { padding-left: 20px; }
+  .toc li { margin-bottom: 8px; }
+  .toc a { text-decoration: none; color: #2980b9; font-weight: 500; }
+  .toc a:hover { text-decoration: underline; }
+  
+  .alert { 
+    background-color: #fff3cd; 
+    border: 1px solid #ffeeba; 
+    color: #856404; 
+    padding: 15px; 
+    border-radius: 4px; 
+    margin: 20px 0; 
+    border-left: 5px solid #ffc107;
+  }
+  .info { 
+    background-color: #d1ecf1; 
+    border: 1px solid #bee5eb; 
+    color: #0c5460; 
+    padding: 15px; 
+    border-radius: 4px; 
+    margin: 20px 0; 
+    border-left: 5px solid #17a2b8;
+  }
+  
+  .screenshot { 
+    border: 2px dashed #cbd5e0; 
+    background: #f7fafc; 
+    padding: 30px; 
+    text-align: center; 
+    margin: 25px 0; 
+    color: #718096; 
+    font-style: italic; 
+    border-radius: 8px;
+  }
+  .screenshot::before {
+    content: "📷";
+    display: block;
+    font-size: 2em;
+    margin-bottom: 10px;
+  }
+  
+  .btn-ref { 
+    background: #e2e8f0; 
+    border: 1px solid #cbd5e0; 
+    padding: 2px 8px; 
+    border-radius: 4px; 
+    font-weight: bold; 
+    font-size: 0.9em; 
+    color: #2d3748;
+  }
+  
+  table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+  th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+  th { background-color: #f2f2f2; color: #333; }
+  
+  .footer {
+    margin-top: 50px;
+    padding-top: 20px;
+    border-top: 1px solid #eee;
+    text-align: center;
+    font-size: 0.9em;
+    color: #888;
+  }
+</style>
+</head>
+<body>
+
+  <h1>🐾 Guide Utilisateur PLR Vet</h1>
+  <p style="text-align: center; font-size: 1.1em; color: #555;">
+    Manuel de référence pour la pupillométrie vétérinaire numérique
+  </p>
+
+  <div class="toc">
+    <h2>Table des matières</h2>
+    <ul>
+      <li><a href="#intro">1. Introduction</a></li>
+      <li><a href="#install">2. Installation et Démarrage</a></li>
+      <li><a href="#interface">3. Découverte de l'Interface</a></li>
+      <li><a href="#exam">4. Réaliser un Examen (Pas à Pas)</a></li>
+      <li><a href="#results">5. Comprendre les Résultats</a></li>
+      <li><a href="#faq">6. Dépannage et FAQ</a></li>
+    </ul>
+  </div>
+
+  <h2 id="intro">1. Introduction</h2>
+  <p>Bienvenue dans <strong>PLR Vet</strong>, votre assistant numérique de pupillométrie. Ce logiciel a été conçu pour simplifier l'analyse objective du réflexe photomoteur (PLR - Pupillary Light Reflex) chez le chien et le chat.</p>
+  <p>Il remplace l'évaluation subjective à la lampe stylo par une mesure précise, chiffrée et enregistrée.</p>
+  <h3>Fonctionnalités Clés :</h3>
+  <ul>
+    <li>🎥 <strong>Acquisition Haute Fréquence :</strong> Analyse l'œil à 60 images/seconde pour ne rien rater de la réaction pupillaire.</li>
+    <li>⚡ <strong>Stimulation Calibrée :</strong> Utilise un flash contrôlé pour une répétabilité parfaite.</li>
+    <li>📊 <strong>Analyse Automatique :</strong> Calcule la latence, la vitesse et l'amplitude sans calcul manuel.</li>
+    <li>📁 <strong>Dossier Patient :</strong> Historique complet et export PDF pour vos référés.</li>
+  </ul>
+
+  <h2 id="install">2. Installation et Démarrage</h2>
+  <div class="info">
+    <strong>Note :</strong> Si vous avez reçu le logiciel avec la tablette PLR Vet, tout est déjà configuré. Vous n'avez aucune installation à faire.
+  </div>
+  <h3>Démarrage Quotidien</h3>
+  <ol>
+    <li>Connectez la <strong>caméra IR (Infrarouge)</strong> au port USB de l'ordinateur.</li>
+    <li>Double-cliquez sur l'icône <span class="btn-ref">👁️ PLR Vet</span> située sur le bureau.</li>
+    <li>Le logiciel s'ouvre sur l'écran de sélection des patients.</li>
+  </ol>
+
+  <h2 id="interface">3. Découverte de l'Interface</h2>
+  
+  <h3>3.1 Écran d'Accueil (Dossiers)</h3>
+  <div class="screenshot">
+    [Capture : Liste des patients à gauche, formulaire de recherche en haut]
+  </div>
+  <p>C'est votre tableau de bord administratif. Vous pouvez :</p>
+  <ul>
+    <li><strong>Rechercher</strong> un animal existant (tapez son nom ou n° de puce).</li>
+    <li><strong>Créer</strong> une nouvelle fiche en cliquant sur le bouton vert <span class="btn-ref">+ Nouveau Patient</span>.</li>
+  </ul>
+
+  <h3>3.2 Fenêtre d'Examen (Capture)</h3>
+  <div class="screenshot">
+    [Capture : Retour vidéo au centre, graphique en bas, contrôles à droite]
+  </div>
+  <p>L'écran principal est divisé en trois zones :</p>
+  <table>
+    <tr>
+      <th>Zone</th>
+      <th>Description</th>
+    </tr>
+    <tr>
+      <td><strong>Retour Vidéo</strong></td>
+      <td>Affiche l'œil en temps réel. Un <strong>cercle vert</strong> doit entourer la pupille.</td>
+    </tr>
+    <tr>
+      <td><strong>Graphique</strong></td>
+      <td>Trace la courbe du diamètre pupillaire en direct (ligne bleue).</td>
+    </tr>
+    <tr>
+      <td><strong>Contrôles</strong></td>
+      <td>Boutons pour choisir l'œil (OD/OG) et lancer l'enregistrement.</td>
+    </tr>
+  </table>
+
+  <h2 id="exam">4. Réaliser un Examen (Pas à Pas)</h2>
+
+  <div class="alert">
+    <strong>Environnement :</strong> Pour des résultats optimaux, placez l'animal dans une pièce en <strong>pénombre</strong> (lumière tamisée) 5 minutes avant l'examen pour favoriser une dilatation naturelle.
+  </div>
+
+  <h3>Étape 1 : Positionnement</h3>
+  <p>Approchez la caméra de l'œil du patient (distance 3 à 6 cm). Regardez l'écran :</p>
+  <ul>
+    <li>La pupille doit apparaître <strong>noire</strong> sur un fond gris (iris).</li>
+    <li>Le logiciel doit dessiner un <strong>cercle vert</strong> stable autour de la pupille.</li>
+  </ul>
+
+  <h3>Étape 2 : Lancement</h3>
+  <ol>
+    <li>Sélectionnez l'œil testé : Cliquez sur <span class="btn-ref">OD</span> (Droit) ou <span class="btn-ref">OG</span> (Gauche).</li>
+    <li>Stabilisez votre main et la tête de l'animal.</li>
+    <li>Lancez l'examen en appuyant sur la <strong>Barre Espace</strong> ou le bouton <span class="btn-ref">🔴 REC</span>.</li>
+  </ol>
+
+  <h3>Étape 3 : Séquence Automatique</h3>
+  <p>Ne touchez plus à rien ! Le logiciel enchaîne seul les phases :</p>
+  <ul>
+    <li><strong>Baseline (3s) :</strong> Mesure de la pupille au repos.</li>
+    <li><strong>FLASH (0.2s) :</strong> Stimulation lumineuse.</li>
+    <li><strong>Réponse (5s) :</strong> Enregistrement de la contraction et redilatation.</li>
+  </ul>
+  <p><em>Un bip sonore indique la fin de l'enregistrement.</em></p>
+
+  <h2 id="results">5. Comprendre les Résultats</h2>
+  <p>L'analyse est immédiate. Voici comment interpréter les chiffres :</p>
+
+  <h3>Le Graphique</h3>
+  <div class="screenshot">
+    [Illustration courbe : Plateau haut, chute rapide, remontée lente]
+  </div>
+  <p>La courbe bleue montre l'évolution du diamètre. La ligne verticale rouge marque le moment du flash.</p>
+
+  <h3>Les Valeurs Clés (KPI)</h3>
+  <ul>
+    <li><strong>Baseline (mm) :</strong> Taille initiale. <br><em>En pénombre, un chien sain est entre 5 et 10 mm.</em></li>
+    <li><strong>Constriction (%) :</strong> Force du réflexe. <br><em>Formule : (Taille Max - Taille Min) / Taille Max. Une valeur < 10% est anormale.</em></li>
+    <li><strong>Latence (sec) :</strong> Temps de réaction. <br><em>Normalement < 0.2 secondes. Un délai long peut signer une atteinte nerveuse.</em></li>
+    <li><strong>Vitesse Moyenne (mm/s) :</strong> Rapidité de fermeture.</li>
+  </ul>
+
+  <h2 id="faq">6. Dépannage et FAQ</h2>
+
+  <p><strong>Q : Le cercle vert ne détecte pas la pupille.</strong><br>
+  R : C'est souvent un problème de luminosité ou de reflets.</p>
+  <ul>
+    <li>Vérifiez qu'aucune lumière directe ne se reflète dans l'œil (effet miroir).</li>
+    <li>Ajustez le curseur <strong>"Seuil"</strong> dans les réglages pour assombrir/éclaircir l'image traitée.</li>
+  </ul>
+
+  <p><strong>Q : Le patient cligne des yeux pendant le flash.</strong><br>
+  R : C'est normal. Le logiciel possède un algorithme de "nettoyage" qui ignore les frames où l'œil est fermé (perte de suivi) et interpole la courbe.</p>
+
+  <p><strong>Q : Comment exporter le rapport ?</strong><br>
+  R : Dans l'onglet Résultats, cliquez sur <span class="btn-ref">🖨️ PDF</span>. Le fichier est enregistré dans le dossier <code>Documents/PLR_Reports</code>.</p>
+
+  <div class="footer">
+    © 2024 PLR Vet Solutions - Documentation Client v1.0<br>
+    Support Technique : support@plr-vet.com | Urgence : 01 23 45 67 89
+  </div>
+
+</body>
+</html>`;
+
+const App = () => {
+  const downloadLinkRef = useRef(null);
+
+  const handleDownload = () => {
+    // Création d'un Blob contenant le fichier HTML complet
+    const blob = new Blob([USER_GUIDE_HTML], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    
+    // Déclenchement du téléchargement via un lien caché
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = "PLR_Vet_Guide_Utilisateur.html";
+    document.body.appendChild(link);
+    link.click();
+    
+    // Nettoyage
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Extraction du contenu du body pour l'aperçu (sans les balises html/head/body pour React)
+  // Utilisation de useMemo pour éviter de re-parser à chaque rendu (optimisation)
+  const previewContent = useMemo(() => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(USER_GUIDE_HTML, 'text/html');
+    // On injecte les styles dans l'aperçu pour que le rendu soit identique
+    const styles = doc.querySelector('style')?.innerHTML || '';
+    const bodyContent = doc.body.innerHTML;
+    
+    return {
+      __html: `<style>${styles}</style><div class="preview-mode">${bodyContent}</div>`
+    };
+  }, []);
+
+  return (
+    <div className="app-wrapper">
+      <style>{`
+        body { margin: 0; background: #f0f2f5; font-family: sans-serif; }
+        .app-wrapper { display: flex; flex-direction: column; height: 100vh; }
+        
+        .header-bar {
+          background: white;
+          padding: 1rem 2rem;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          position: sticky;
+          top: 0;
+          z-index: 100;
+        }
+        
+        .brand { font-size: 1.2rem; font-weight: bold; color: #2c3e50; display: flex; align-items: center; gap: 10px; }
+        
+        .download-btn {
+          background-color: #3498db;
+          color: white;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 5px;
+          cursor: pointer;
+          font-weight: bold;
+          font-size: 1rem;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          transition: background 0.2s;
+        }
+        
+        .download-btn:hover { background-color: #2980b9; }
+
+        .preview-container {
+          flex: 1;
+          overflow-y: auto;
+          padding: 2rem;
+          display: flex;
+          justify-content: center;
+        }
+
+        .paper-preview {
+          background: white;
+          width: 100%;
+          max-width: 800px; /* A4 width approx */
+          box-shadow: 0 0 15px rgba(0,0,0,0.1);
+          min-height: 1000px;
+          /* Le padding est géré par le HTML injecté */
+        }
+      `}</style>
+
+      <div className="header-bar">
+        <div className="brand">
+          <span>🐾</span> PLR Vet - Documentation
+        </div>
+        <button onClick={handleDownload} className="download-btn">
+          <span>📥</span> Télécharger le Guide (.html)
+        </button>
+      </div>
+
+      <div className="preview-container">
+        <div className="paper-preview">
+           {/* Injection du HTML généré pour aperçu fidèle */}
+           <div dangerouslySetInnerHTML={previewContent} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const container = document.getElementById('root');
+if (container) {
+  const root = createRoot(container);
+  root.render(<App />);
+}
