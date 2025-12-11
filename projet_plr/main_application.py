@@ -1,7 +1,7 @@
 """
 main_application.py
 ===================
-Interface Examen V3.22 (Indicateur État Caméra + Sécurité Lancement).
+Interface Examen V3.28 (Historique : Nettoyage couleurs et Francisation).
 """
 
 import sys
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QTextEdit, QFileDialog, QSizePolicy, QMenu
 )
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer, QPoint, QTranslator, QLibraryInfo
-from PySide6.QtGui import QImage, QPixmap, QAction, QColor, QCursor
+from PySide6.QtGui import QImage, QPixmap, QAction, QColor, QCursor, QKeyEvent
 
 # --- IMPORTS PROJET ---
 from camera_engine import CameraEngine
@@ -33,16 +33,27 @@ from welcome_screen import WelcomeScreen
 from calibration_dialog import CalibrationDialog
 from pdf_generator import PDFGenerator
 from styles import apply_modern_theme
+from hardware_manager import HardwareManager
 
 logging.basicConfig(level=logging.INFO)
 
 class FlashOverlay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setStyleSheet("background-color: #FFFFFF;")
+        self.setAttribute(Qt.WA_StyledBackground, True) 
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        
+        self.current_color = "#FFFFFF"
+        self.setStyleSheet(f"background-color: {self.current_color};")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setWindowOpacity(1.0)
         self.setGeometry(QApplication.primaryScreen().geometry())
+
+    def set_color(self, color_hex):
+        """Change la couleur de fond de l'overlay et force la mise à jour."""
+        self.current_color = color_hex
+        self.setStyleSheet(f"background-color: {self.current_color};")
+        self.update()
 
 class CameraThread(QThread):
     frame_ready = Signal(np.ndarray); pupil_detected = Signal(dict); fps_updated = Signal(float); error_occurred = Signal(str); camera_started = Signal()
@@ -76,29 +87,44 @@ class ControlPanel(QWidget):
     threshold_changed=Signal(int); blur_changed=Signal(int); display_mode_changed=Signal(str); test_requested=Signal(); settings_requested=Signal(); reset_camera_requested=Signal()
     def __init__(self): super().__init__(); self.setup_ui()
     def setup_ui(self):
-        l=QVBoxLayout(self); l.setSpacing(15)
+        l=QVBoxLayout(self); l.setSpacing(10)
         
-        # --- NOUVEAU : INDICATEUR ETAT CAMERA ---
-        self.lbl_cam_status = QLabel(self.tr("État Caméra : Inconnu"))
-        self.lbl_cam_status.setAlignment(Qt.AlignCenter)
-        self.lbl_cam_status.setFixedHeight(35)
-        # Style par défaut (Gris)
-        self.lbl_cam_status.setStyleSheet("background-color: #e0e0e0; color: #555; border-radius: 5px; font-weight: bold; font-size: 11pt;")
-        l.addWidget(self.lbl_cam_status)
-        # ----------------------------------------
+        # INDICATEURS
+        h_ind = QHBoxLayout()
+        self.lbl_cam_status = QLabel(self.tr("Caméra: ?"))
+        self.lbl_cam_status.setAlignment(Qt.AlignCenter); self.lbl_cam_status.setFixedHeight(30)
+        self.lbl_hw_status = QLabel(self.tr("Appareil: Connecté"))
+        self.lbl_hw_status.setAlignment(Qt.AlignCenter); self.lbl_hw_status.setFixedHeight(30)
+        self.lbl_hw_status.setStyleSheet("background-color: #d4edda; color: #155724; border-radius: 5px; font-weight: bold;")
+        h_ind.addWidget(self.lbl_cam_status); h_ind.addWidget(self.lbl_hw_status)
+        l.addLayout(h_ind)
 
+        # CHOIX OEIL
         ge=QGroupBox(self.tr("Choix de l'Œil")); he=QHBoxLayout(); self.eg=QButtonGroup(self)
         self.rod=QRadioButton(self.tr("OD (Droit)")); self.rod.setStyleSheet("color:#d32f2f;font-weight:bold;"); self.rod.setChecked(True)
         self.rog=QRadioButton(self.tr("OG (Gauche)")); self.rog.setStyleSheet("color:#1976d2;font-weight:bold;")
         self.eg.addButton(self.rod); self.eg.addButton(self.rog); he.addWidget(self.rod); he.addWidget(self.rog); ge.setLayout(he); l.addWidget(ge)
         
+        # CHOIX COULEUR FLASH
+        gc=QGroupBox(self.tr("Stimulus Chromatique")); hc=QHBoxLayout(); self.cg=QButtonGroup(self)
+        self.rc_blue = QRadioButton(self.tr("Bleu")); self.rc_blue.setStyleSheet("color:#007bff; font-weight:bold;")
+        self.rc_red = QRadioButton(self.tr("Rouge")); self.rc_red.setStyleSheet("color:#dc3545; font-weight:bold;")
+        self.rc_white = QRadioButton(self.tr("Blanc")); self.rc_white.setStyleSheet("color:#555;")
+        self.rc_blue.setChecked(True)
+        self.cg.addButton(self.rc_blue); self.cg.addButton(self.rc_red); self.cg.addButton(self.rc_white)
+        hc.addWidget(self.rc_blue); hc.addWidget(self.rc_red); hc.addWidget(self.rc_white)
+        gc.setLayout(hc); l.addWidget(gc)
+
+        # REGLAGES
         gs=QGroupBox(self.tr("Réglages Caméra")); fl=QVBoxLayout()
         self.st=QSlider(Qt.Horizontal); self.st.setRange(0,255); self.st.setValue(50); self.st.valueChanged.connect(self.threshold_changed.emit)
         self.sb=QSlider(Qt.Horizontal); self.sb.setRange(1,21); self.sb.setValue(5); self.sb.valueChanged.connect(self.blur_changed.emit)
         self.cm=QComboBox(); self.cm.addItems(["Normal","ROI","Binaire","Mosaïque"]); self.cm.currentTextChanged.connect(lambda t:self._on_mode(t))
         fl.addWidget(QLabel(self.tr("Seuil"))); fl.addWidget(self.st); fl.addWidget(QLabel(self.tr("Flou"))); fl.addWidget(self.sb); fl.addWidget(QLabel(self.tr("Vue"))); fl.addWidget(self.cm); gs.setLayout(fl); l.addWidget(gs)
         
-        self.bt=QPushButton(self.tr("▶ LANCER EXAMEN")); self.bt.setFixedHeight(50); self.bt.setStyleSheet("background:#28a745;color:white;font-weight:bold;border-radius:5px;"); self.bt.clicked.connect(self.test_requested.emit)
+        # BOUTON LANCER
+        self.bt=QPushButton(self.tr("▶ LANCER EXAMEN")); self.bt.setFixedHeight(45); self.bt.setStyleSheet("background:#28a745;color:white;font-weight:bold;border-radius:5px;"); self.bt.clicked.connect(self.test_requested.emit)
+        
         self.pb=QProgressBar(); self.pb.setAlignment(Qt.AlignCenter); self.pb.setValue(0); self.pb.setStyleSheet("QProgressBar{border:1px solid #999;border-radius:5px;text-align:center;} QProgressBar::chunk{background-color:#28a745;}")
         self.br=QPushButton(self.tr("🔄 Réinit. Caméra")); self.br.setStyleSheet("background:#e67e22;color:white;padding:5px;border-radius:4px;"); self.br.clicked.connect(self.reset_camera_requested.emit)
         l.addWidget(self.bt); l.addWidget(self.pb); l.addWidget(self.br); l.addStretch()
@@ -111,15 +137,29 @@ class ControlPanel(QWidget):
         self.display_mode_changed.emit(mode)
         
     def get_selected_eye(self): return "OD" if self.rod.isChecked() else "OG"
+    
+    def get_selected_color(self): 
+        if self.rc_blue.isChecked(): return "BLUE"
+        if self.rc_red.isChecked(): return "RED"
+        return "WHITE"
 
-    # --- NOUVEAU : Fonction pour mettre à jour l'indicateur ---
     def set_camera_status(self, connected: bool):
         if connected:
-            self.lbl_cam_status.setText(self.tr("✅ CAMÉRA CONNECTÉE"))
+            self.lbl_cam_status.setText(self.tr("✅ CAM"))
             self.lbl_cam_status.setStyleSheet("background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; border-radius: 5px; font-weight: bold;")
         else:
-            self.lbl_cam_status.setText(self.tr("❌ CAMÉRA DÉCONNECTÉE"))
+            self.lbl_cam_status.setText(self.tr("❌ CAM"))
             self.lbl_cam_status.setStyleSheet("background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; border-radius: 5px; font-weight: bold;")
+
+    def set_button_running(self, running):
+        if running:
+            self.bt.setText(self.tr("EN COURS..."))
+            self.bt.setStyleSheet("background:#17a2b8;color:white;font-weight:bold;")
+            self.bt.setEnabled(False)
+        else:
+            self.bt.setText(self.tr("▶ LANCER EXAMEN"))
+            self.bt.setStyleSheet("background:#28a745;color:white;font-weight:bold;")
+            self.bt.setEnabled(True)
 
 class MainWindow(QMainWindow):
     def __init__(self, patient_data):
@@ -131,17 +171,31 @@ class MainWindow(QMainWindow):
         self.selected_historical_exam = None
         self.camera_thread = None
         self.engine = None
-        self.total_test_duration = 0.0
+        
+        self.hardware = HardwareManager()
+        self.hardware.trigger_pressed.connect(self.start_test)
+        
+        self.is_camera_ready = False
+        self.is_test_running = False 
+        
         self.current_laterality = 'OD'
-        
-        # --- ETAT DE LA CAMERA ---
-        self.is_camera_ready = False 
-        
+        self.current_color = 'BLUE'
+
         self.setup_ui()
         self.start_camera()
+        self._apply_default_color()
+
         if self.patient: 
             self.setWindowTitle(self.tr("Dossier Patient : {name} ({species})").format(name=self.patient['name'], species=self.patient['species']))
             self.load_patient_history()
+            
+        self.hardware.connect_device()
+
+    def _apply_default_color(self):
+        def_col = self.conf.get("protocol", "default_color", "BLUE")
+        if def_col == "BLUE": self.controls.rc_blue.setChecked(True)
+        elif def_col == "RED": self.controls.rc_red.setChecked(True)
+        else: self.controls.rc_white.setChecked(True)
 
     def setup_ui(self):
         self.resize(1400, 950)
@@ -158,7 +212,6 @@ class MainWindow(QMainWindow):
         
         right_split = QSplitter(Qt.Vertical)
         self.graph_widget = PLRGraphWidget()
-        
         bottom_w = QWidget(); bl = QVBoxLayout(bottom_w); bl.setContentsMargins(0,0,0,0)
         
         self.grp_actions = QGroupBox(self.tr("Actions")); self.grp_actions.setStyleSheet("background-color:#f0f4c3; font-weight:bold;")
@@ -166,49 +219,96 @@ class MainWindow(QMainWindow):
         self.btn_save = QPushButton(self.tr("💾 SAUVEGARDER NOUVEAU")); self.btn_save.clicked.connect(self.save_new_exam)
         self.btn_discard = QPushButton(self.tr("🗑️ Jeter")); self.btn_discard.clicked.connect(self.discard_exam)
         self.btn_save.setStyleSheet("background:#28a745;color:white;font-weight:bold;padding:5px;"); self.btn_discard.setStyleSheet("background:#dc3545;color:white;padding:5px;")
-        
         self.btn_update_comment = QPushButton(self.tr("💾 MAJ Commentaire")); self.btn_update_comment.clicked.connect(self.update_historical_comment)
         self.btn_pdf = QPushButton(self.tr("📄 EXPORT PDF")); self.btn_pdf.clicked.connect(self.export_pdf)
         self.btn_excel = QPushButton(self.tr("📊 EXPORT DATA")); self.btn_excel.clicked.connect(self.export_excel)
         self.btn_excel.setStyleSheet("background:#ff9800;color:white;font-weight:bold;padding:5px;")
-        
         self.btn_update_comment.setStyleSheet("background:#007bff;color:white;font-weight:bold;padding:5px;"); self.btn_pdf.setStyleSheet("background:#17a2b8;color:white;font-weight:bold;padding:5px;")
         hl_act.addWidget(self.btn_save); hl_act.addWidget(self.btn_discard); hl_act.addWidget(self.btn_update_comment); hl_act.addWidget(self.btn_pdf); hl_act.addWidget(self.btn_excel)
         self.grp_actions.setLayout(hl_act); self.grp_actions.setVisible(False)
         
-        self.grp_com = QGroupBox(self.tr("Rapport / Commentaires"))
-        vl_com = QVBoxLayout(); hl_mac = QHBoxLayout()
+        self.grp_com = QGroupBox(self.tr("Rapport / Commentaires")); vl_com = QVBoxLayout(); hl_mac = QHBoxLayout()
         self.combo_macros = QComboBox(); self.combo_macros.addItem(self.tr("--- Insérer phrase type ---"))
         self._load_macros(); self.combo_macros.currentIndexChanged.connect(self._insert_macro)
-        hl_mac.addWidget(self.combo_macros); hl_mac.addStretch()
-        self.txt_comments = QTextEdit(); self.txt_comments.setPlaceholderText(self.tr("Observations..."))
-        self.txt_comments.setMaximumHeight(80)
-        vl_com.addLayout(hl_mac); vl_com.addWidget(self.txt_comments)
-        self.grp_com.setLayout(vl_com)
+        hl_mac.addWidget(self.combo_macros); hl_mac.addStretch(); self.txt_comments = QTextEdit(); self.txt_comments.setPlaceholderText(self.tr("Observations...")); self.txt_comments.setMaximumHeight(80); vl_com.addLayout(hl_mac); vl_com.addWidget(self.txt_comments); self.grp_com.setLayout(vl_com)
 
-        self.grp_hist = QGroupBox(self.tr("Historique (Clic Droit pour options, Clic Entête pour trier)")); vl_hist = QVBoxLayout()
-        self.table_hist = QTableWidget(0, 5); self.table_hist.setHorizontalHeaderLabels([self.tr("Date & Heure"),self.tr("Oeil"),self.tr("Type"),self.tr("Note"),self.tr("Comp")])
+        self.grp_hist = QGroupBox(self.tr("Historique")); vl_hist = QVBoxLayout()
+        self.table_hist = QTableWidget(0, 6); self.table_hist.setHorizontalHeaderLabels([self.tr("Date & Heure"),self.tr("Oeil"),self.tr("Stim"),self.tr("Type"),self.tr("Note"),self.tr("Comp")])
         self.table_hist.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table_hist.setSelectionBehavior(QAbstractItemView.SelectRows); self.table_hist.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table_hist.setSortingEnabled(True)
-        self.table_hist.setContextMenuPolicy(Qt.CustomContextMenu); self.table_hist.customContextMenuRequested.connect(self.show_history_menu)
-        self.table_hist.itemClicked.connect(self.on_history_clicked)
-        vl_hist.addWidget(self.table_hist); self.grp_hist.setLayout(vl_hist)
+        self.table_hist.setSortingEnabled(True); self.table_hist.setContextMenuPolicy(Qt.CustomContextMenu); self.table_hist.customContextMenuRequested.connect(self.show_history_menu); self.table_hist.itemClicked.connect(self.on_history_clicked); vl_hist.addWidget(self.table_hist); self.grp_hist.setLayout(vl_hist)
         
         bl.addWidget(self.grp_actions); bl.addWidget(self.grp_com); bl.addWidget(self.grp_hist)
-        right_split.addWidget(self.graph_widget); right_split.addWidget(bottom_w)
-        right_split.setStretchFactor(0, 5); right_split.setStretchFactor(1, 5)
+        right_split.addWidget(self.graph_widget); right_split.addWidget(bottom_w); right_split.setStretchFactor(0, 5); right_split.setStretchFactor(1, 5)
         
         main_lay.addWidget(QSplitter(Qt.Horizontal)); main_lay.itemAt(0).widget().addWidget(left); main_lay.itemAt(0).widget().addWidget(right_split); main_lay.itemAt(0).widget().setSizes([500,900])
         
         self.status = QStatusBar(); self.setStatusBar(self.status)
         self._create_menu(); self.load_patient_history(); self._set_ui_state("IDLE")
 
+    # --- SIMULATION GÂCHETTE CLAVIER ---
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() == Qt.Key_Space:
+            self.hardware.simulate_trigger_press()
+        super().keyPressEvent(event)
+
+    def trigger_flash(self, on):
+        """Gère l'affichage du flash à l'écran avec la bonne couleur."""
+        if not hasattr(self, 'flash'): self.flash = FlashOverlay()
+        
+        if on:
+            hex_color = "#FFFFFF" 
+            if self.current_color == "BLUE": hex_color = "#0000FF" 
+            elif self.current_color == "RED": hex_color = "#FF0000" 
+            self.flash.set_color(hex_color)
+            self.flash.showFullScreen()
+        else:
+            self.flash.close()
+
+    def start_test(self):
+        if self.is_test_running: return
+        if not self.engine or not self.is_camera_ready:
+            QMessageBox.critical(self, self.tr("Erreur"), self.tr("Impossible de lancer l'examen : La caméra n'est pas connectée !"))
+            return
+        if self.temp_result_meta is not None:
+             if QMessageBox.question(self, self.tr("Attention"), self.tr("Un examen est en cours.\nÉcraser ?"), QMessageBox.Yes|QMessageBox.No, QMessageBox.No) == QMessageBox.No: return
+
+        self.is_test_running = True
+        self.controls.set_button_running(True)
+        self._set_ui_state("IDLE")
+        self.selected_historical_exam = None
+        
+        p = self.conf.config.get("protocol", {})
+        base = p.get("baseline_duration", 2.0); flash_s = p.get("flash_duration_ms", 200) / 1000.0; resp = p.get("response_duration", 5.0); count = p.get("flash_count", 1)
+        self.controls.pb.setRange(0, int((base + flash_s + resp)*count*10))
+        self.engine.configure(baseline_duration=base, flash_count=count, flash_duration_ms=int(flash_s*1000), response_duration=resp)
+        self.current_laterality = self.controls.get_selected_eye()
+        self.current_color = self.controls.get_selected_color()
+        
+        self.hardware.send_flash_command(self.current_color, int(flash_s * 1000))
+        self.engine.start_test(f"{self.patient['name']}_{self.current_laterality}_{self.current_color}")
+        self.controls.setEnabled(False)
+
+    def on_test_finished(self, meta):
+        self.is_test_running = False
+        self.controls.set_button_running(False)
+        self.controls.setEnabled(True)
+        self.controls.pb.setFormat(self.tr("Terminé"))
+        if os.path.getsize(meta['csv_path']) < 100: return
+        an = PLRAnalyzer(); an.load_data(meta['csv_path']); an.preprocess()
+        met = an.analyze(flash_timestamp=meta['flash_timestamp'])
+        met['flash_timestamp'] = meta['flash_timestamp']; met['flash_duration_s'] = meta['config']['flash_duration_ms'] / 1000.0; met['flash_color'] = self.current_color 
+        col = '#b71c1c' if self.current_laterality == 'OD' else '#0d47a1'
+        self.graph_widget.plot_data([{'label': f'Actuel ({self.current_laterality})', 'df': an.data, 'metrics': met, 'color': col}], clear=True)
+        self.temp_result_meta = {'csv': meta['csv_path'], 'metrics': met}
+        self._set_ui_state("NEW_RESULT")
+
+    # ... (Le reste : load_patient_history, save, export... reste identique) ...
     def _create_menu(self):
         m = self.menuBar()
         m.addMenu(self.tr("Fichier")).addAction(self.tr("Retour"), self.return_to_home)
         o = m.addMenu(self.tr("Options")); o.addAction(self.tr("Réglages"), self._settings); o.addAction(self.tr("Calibration"), self._calib)
-        m.addMenu(self.tr("Aide")).addAction(self.tr("À propos"), lambda: QMessageBox.about(self,"Info","V3.22"))
+        m.addMenu(self.tr("Aide")).addAction(self.tr("À propos"), lambda: QMessageBox.about(self,"Info","V3.28"))
 
     def show_history_menu(self, pos):
         item = self.table_hist.itemAt(pos)
@@ -218,16 +318,14 @@ class MainWindow(QMainWindow):
         act_od = menu_select.addAction(self.tr("Cocher OD uniquement")); act_og = menu_select.addAction(self.tr("Cocher OG uniquement"))
         menu.addSeparator()
         action_view = None; action_pdf = None; action_xls = None; action_del = None
-        
         if item:
             self.table_hist.selectRow(item.row())
-            ex_data = self.table_hist.item(item.row(), 4).data(Qt.UserRole)
+            ex_data = self.table_hist.item(item.row(), 5).data(Qt.UserRole)
             action_view = menu.addAction(self.tr("👁️ Voir / Éditer"))
             action_pdf = menu.addAction(self.tr("📄 Exporter PDF"))
             action_xls = menu.addAction(self.tr("📊 Exporter Excel (Data)"))
             menu.addSeparator()
             action_del = menu.addAction(self.tr("🗑️ Supprimer l'examen"))
-        
         action = menu.exec(self.table_hist.mapToGlobal(pos))
         if action == act_all: self.batch_selection("ALL")
         elif action == act_none: self.batch_selection("NONE")
@@ -241,7 +339,7 @@ class MainWindow(QMainWindow):
     def batch_selection(self, mode):
         self.table_hist.blockSignals(True)
         for r in range(self.table_hist.rowCount()):
-            item_chk = self.table_hist.item(r, 4); item_eye = self.table_hist.item(r, 1)
+            item_chk = self.table_hist.item(r, 5); item_eye = self.table_hist.item(r, 1)
             should = False
             if mode == "ALL": should = True
             elif mode == "NONE": should = False
@@ -258,12 +356,13 @@ class MainWindow(QMainWindow):
             col = '#b71c1c' if self.current_laterality == 'OD' else '#0d47a1'
             curves.append({'label': self.tr('Actuel'), 'df': an.data, 'metrics': self.temp_result_meta['metrics'], 'color': col})
         for r in range(self.table_hist.rowCount()):
-            if self.table_hist.item(r, 4).checkState() == Qt.Checked:
-                ex = self.table_hist.item(r, 4).data(Qt.UserRole)
+            if self.table_hist.item(r, 5).checkState() == Qt.Checked:
+                ex = self.table_hist.item(r, 5).data(Qt.UserRole)
                 try:
                     an = PLRAnalyzer(); an.load_data(ex['csv_path']); an.preprocess()
                     lat = ex.get('laterality', '?'); col = '#ff8a80' if lat == 'OD' else '#82b1ff'
-                    curves.append({'label': f"{ex['exam_date'].split(' ')[0]} ({lat})", 'df': an.data, 'metrics': ex.get('results_data',{}), 'color': col, 'style':'-'})
+                    stim = ex.get('results_data', {}).get('flash_color', '?')
+                    curves.append({'label': f"{ex['exam_date'].split(' ')[0]} ({lat}-{stim})", 'df': an.data, 'metrics': ex.get('results_data',{}), 'color': col, 'style':'-'})
                 except: pass
         self.graph_widget.plot_data(curves, clear=True)
 
@@ -292,32 +391,15 @@ class MainWindow(QMainWindow):
         c = self.conf.config.get("camera", {})
         self.camera_thread = CameraThread(int(c.get("index", 0)))
         self.camera_thread.frame_ready.connect(self.video.update_frame)
-        
-        # Connexions des signaux d'état
         self.camera_thread.camera_started.connect(self.on_camera_started)
         self.camera_thread.error_occurred.connect(self.on_camera_error)
         self.camera_thread.camera_started.connect(self.init_engine)
-        
         self.camera_thread.start()
 
-    # --- SLOTS GESTION ETAT CAMERA ---
-    def on_camera_started(self):
-        """Appelé quand la caméra est prête."""
-        self.is_camera_ready = True
-        self.controls.set_camera_status(True)
-        self.controls.bt.setEnabled(True)
-
-    def on_camera_error(self, err_msg):
-        """Appelé quand la caméra plante ou ne démarre pas."""
-        self.is_camera_ready = False
-        self.controls.set_camera_status(False)
-        self.controls.bt.setEnabled(False)
-        
-        self.status.showMessage(self.tr("⚠️ Erreur Caméra"))
-        QMessageBox.critical(self, self.tr("Erreur Caméra"), self.tr("Problème détecté :\n\n{err}\n\n👉 Vérifiez le branchement USB.\n👉 Cliquez ensuite sur '🔄 Réinit. Caméra'.").format(err=err_msg))
-
+    def on_camera_started(self): self.is_camera_ready = True; self.controls.set_camera_status(True); self.controls.bt.setEnabled(True)
+    def on_camera_error(self, err_msg): self.is_camera_ready = False; self.controls.set_camera_status(False); self.controls.bt.setEnabled(False); self.status.showMessage(self.tr("⚠️ Erreur Caméra")); QMessageBox.critical(self, self.tr("Erreur Caméra"), self.tr("Problème détecté :\n\n{err}\n\n👉 Vérifiez le branchement USB.\n👉 Cliquez ensuite sur '🔄 Réinit. Caméra'.").format(err=err_msg))
+    
     def init_engine(self):
-        # Cette fonction est maintenant appelée après on_camera_started
         c = self.conf.config.get("camera", {}); d = self.conf.config.get("detection", {})
         self.camera_thread.camera.mm_per_pixel = float(c.get("mm_per_pixel", 0.05))
         self.camera_thread.set_threshold(int(d.get("canny_threshold1", 50)))
@@ -332,46 +414,7 @@ class MainWindow(QMainWindow):
         self.engine.progress_updated.connect(lambda e, p: [self.controls.pb.setValue(int(e*10)), self.controls.pb.setFormat(f"{p} : {e:.1f}s")])
         self.status.showMessage(self.tr("Prêt"))
 
-    def reset_camera(self): 
-        self.status.showMessage(self.tr("Reset..."))
-        self.is_camera_ready = False
-        self.controls.set_camera_status(False)
-        self.stop_camera()
-        QTimer.singleShot(1000, self.start_camera)
-
-    def trigger_flash(self, on): (self.flash.showFullScreen() if on else self.flash.close()) if hasattr(self, 'flash') else (setattr(self, 'flash', FlashOverlay()), self.flash.showFullScreen() if on else self.flash.close())
-
-    def start_test(self):
-        # --- VERIFICATION CRITIQUE AVANT LANCEMENT ---
-        if not self.engine or not self.is_camera_ready:
-            QMessageBox.critical(self, self.tr("Erreur"), self.tr("Impossible de lancer l'examen : La caméra n'est pas connectée !"))
-            return
-        # ---------------------------------------------
-
-        if self.temp_result_meta is not None:
-            if QMessageBox.question(self, self.tr("Attention"), self.tr("Un examen est en cours.\nÉcraser ?"), QMessageBox.Yes|QMessageBox.No, QMessageBox.No) == QMessageBox.No: return
-        self._set_ui_state("IDLE"); self.selected_historical_exam = None
-        p = self.conf.config.get("protocol", {})
-        base = p.get("baseline_duration", 2.0); flash_s = p.get("flash_duration_ms", 200) / 1000.0; resp = p.get("response_duration", 5.0); count = p.get("flash_count", 1)
-        self.controls.pb.setRange(0, int((base + flash_s + resp)*count*10))
-        self.engine.configure(baseline_duration=base, flash_count=count, flash_duration_ms=int(flash_s*1000), response_duration=resp)
-        self.current_laterality = self.controls.get_selected_eye()
-        self.engine.start_test(f"{self.patient['name']}_{self.current_laterality}")
-        self.controls.setEnabled(False)
-
-    def on_test_finished(self, meta):
-        self.controls.setEnabled(True); self.controls.pb.setFormat(self.tr("Terminé"))
-        if os.path.getsize(meta['csv_path']) < 100: return
-        an = PLRAnalyzer()
-        if an.load_data(meta['csv_path']):
-            an.preprocess()
-            met = an.analyze(flash_timestamp=meta['flash_timestamp'])
-            met['flash_timestamp'] = meta['flash_timestamp']; met['flash_duration_s'] = meta['config']['flash_duration_ms'] / 1000.0
-            col = '#b71c1c' if self.current_laterality == 'OD' else '#0d47a1'
-            self.graph_widget.plot_data([{'label': f'Actuel ({self.current_laterality})', 'df': an.data, 'metrics': met, 'color': col}], clear=True)
-            self.temp_result_meta = {'csv': meta['csv_path'], 'metrics': met}
-            self._set_ui_state("NEW_RESULT")
-
+    def reset_camera(self): self.status.showMessage(self.tr("Reset...")); self.is_camera_ready = False; self.controls.set_camera_status(False); self.stop_camera(); QTimer.singleShot(1000, self.start_camera)
     def load_patient_history(self):
         if not self.patient: return
         self.table_hist.setSortingEnabled(False)
@@ -381,19 +424,36 @@ class MainWindow(QMainWindow):
             self.table_hist.insertRow(r)
             date_display = ex['exam_date'][:-3] if len(ex['exam_date']) > 16 else ex['exam_date']
             self.table_hist.setItem(r, 0, QTableWidgetItem(date_display))
+            
+            # --- MODIFICATION OEIL ---
             lat = ex.get('laterality', '?')
-            it = QTableWidgetItem(lat); it.setForeground(QColor('red' if lat=='OD' else 'blue')); self.table_hist.setItem(r, 1, it)
-            self.table_hist.setItem(r, 2, QTableWidgetItem(ex.get('exam_type', 'PLR')))
-            self.table_hist.setItem(r, 3, QTableWidgetItem("📝" if ex.get('comments') else ""))
-            chk = QTableWidgetItem(); chk.setFlags(Qt.ItemIsUserCheckable|Qt.ItemIsEnabled); chk.setCheckState(Qt.Unchecked); chk.setData(Qt.UserRole, ex)
-            self.table_hist.setItem(r, 4, chk)
+            it = QTableWidgetItem(lat)
+            # Pas de setForeground ici pour garder le noir standard
+            self.table_hist.setItem(r, 1, it)
+            
+            # --- MODIFICATION STIMULUS (TRADUCTION) ---
+            res_data = ex.get('results_data', {})
+            stim = res_data.get('flash_color', 'WHITE')
+            
+            # Traduction Française
+            stim_display = stim
+            if stim == "BLUE": stim_display = "Bleu"
+            elif stim == "RED": stim_display = "Rouge"
+            elif stim == "WHITE": stim_display = "Blanc"
+            
+            it_stim = QTableWidgetItem(stim_display)
+            if stim == 'BLUE': it_stim.setForeground(QColor('#007bff'))
+            elif stim == 'RED': it_stim.setForeground(QColor('#dc3545'))
+            self.table_hist.setItem(r, 2, it_stim)
+            
+            self.table_hist.setItem(r, 3, QTableWidgetItem(ex.get('exam_type', 'PLR')))
+            self.table_hist.setItem(r, 4, QTableWidgetItem("📝" if ex.get('comments') else ""))
+            chk = QTableWidgetItem(); chk.setFlags(Qt.ItemIsUserCheckable|Qt.ItemIsEnabled); chk.setCheckState(Qt.Unchecked); chk.setData(Qt.UserRole, ex); self.table_hist.setItem(r, 5, chk)
         self.table_hist.setSortingEnabled(True)
 
     def on_history_clicked(self, item):
-        if item.column() == 4:
-            self._update_comparison_graph()
-            return
-        ex = self.table_hist.item(item.row(), 4).data(Qt.UserRole)
+        if item.column() == 5: self._update_comparison_graph(); return
+        ex = self.table_hist.item(item.row(), 5).data(Qt.UserRole)
         self.selected_historical_exam = ex; self.temp_result_meta = None; self._set_ui_state("HISTORY_VIEW")
         self.txt_comments.setText(ex.get('comments', ''))
         try:
@@ -401,25 +461,17 @@ class MainWindow(QMainWindow):
             col = '#b71c1c' if ex.get('laterality') == 'OD' else '#0d47a1'
             self.graph_widget.plot_data([{'label': f"{ex['exam_date']} ({ex.get('laterality')})", 'df': an.data, 'metrics': ex.get('results_data',{}), 'color': col}], clear=True)
         except: pass
-
     def save_new_exam(self):
-        if self.temp_result_meta:
-            self.db.save_exam(self.patient['id'], self.current_laterality, self.temp_result_meta['csv'], results=self.temp_result_meta['metrics'], comments=self.txt_comments.toPlainText())
-            self._set_ui_state("IDLE"); self.load_patient_history(); self.status.showMessage(self.tr("Sauvegardé."))
-
+        if self.temp_result_meta: self.db.save_exam(self.patient['id'], self.current_laterality, self.temp_result_meta['csv'], results=self.temp_result_meta['metrics'], comments=self.txt_comments.toPlainText()); self._set_ui_state("IDLE"); self.load_patient_history(); self.status.showMessage(self.tr("Sauvegardé."))
     def update_historical_comment(self):
         if self.selected_historical_exam:
             new = self.txt_comments.toPlainText(); eid = self.selected_historical_exam['id']
-            if self.db.update_exam_comment(eid, new):
-                self.load_patient_history(); self.status.showMessage(self.tr("Mis à jour."))
-                self.selected_historical_exam['comments'] = new
-
+            if self.db.update_exam_comment(eid, new): self.load_patient_history(); self.status.showMessage(self.tr("Mis à jour.")); self.selected_historical_exam['comments'] = new
     def discard_exam(self):
-        if self.temp_result_meta:
-            try: os.remove(self.temp_result_meta['csv'])
-            except: pass
+        if self.temp_result_meta: 
+            try: os.remove(self.temp_result_meta['csv']) 
+            except: pass 
         self._set_ui_state("IDLE")
-
     def export_pdf(self):
         if self.selected_historical_exam: ex=self.selected_historical_exam; met=ex.get('results_data',{}); lat=ex.get('laterality'); dat=ex.get('exam_date')
         elif self.temp_result_meta: met=self.temp_result_meta['metrics']; lat=self.current_laterality; dat=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -427,11 +479,8 @@ class MainWindow(QMainWindow):
         fname = f"Rapport_{self.patient['name'].replace(' ','_')}_{dat.split(' ')[0]}.pdf"
         path, _ = QFileDialog.getSaveFileName(self, self.tr("Exporter PDF"), fname, "PDF (*.pdf)")
         if path:
-            gen = PDFGenerator(path)
-            gen.generate(self.db.get_clinic_info(), {"name":self.patient['name'], "species":self.patient['species'], "breed":self.patient.get('breed',''), "id":self.patient['tattoo_id'], "owner":self.patient.get('owner_name','')},
-                         {"date":dat, "laterality":lat}, met, self.txt_comments.toPlainText(), self.graph_widget.fig)
-            QMessageBox.information(self, self.tr("Succès"), self.tr("PDF généré."))
-
+            gen = PDFGenerator(path); exam_info = {"date":dat, "laterality":lat, "stimulus": met.get('flash_color', 'WHITE')}
+            gen.generate(self.db.get_clinic_info(), {"name":self.patient['name'], "species":self.patient['species'], "breed":self.patient.get('breed',''), "id":self.patient['tattoo_id'], "owner":self.patient.get('owner_name','')}, exam_info, met, self.txt_comments.toPlainText(), self.graph_widget.fig); QMessageBox.information(self, self.tr("Succès"), self.tr("PDF généré."))
     def export_excel(self):
         if self.selected_historical_exam: ex=self.selected_historical_exam; csv=ex['csv_path']; met=ex.get('results_data',{}); lat=ex.get('laterality'); dat=ex.get('exam_date')
         elif self.temp_result_meta: csv=self.temp_result_meta['csv']; met=self.temp_result_meta['metrics']; lat=self.current_laterality; dat=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -442,55 +491,40 @@ class MainWindow(QMainWindow):
         if path:
             try:
                 import pandas as pd
-                info = {"Patient":self.patient['name'],"ID":self.patient['tattoo_id'],"Espèce":self.patient['species'],"Date":dat,"Oeil":lat,"Commentaires":self.txt_comments.toPlainText()}
-                with pd.ExcelWriter(path) as w:
-                    pd.DataFrame(list({**info, **met}.items()), columns=["Param", "Valeur"]).to_excel(w, sheet_name="Résumé", index=False)
-                    pd.read_csv(csv).to_excel(w, sheet_name="Raw_Data", index=False)
+                info = {"Patient":self.patient['name'],"ID":self.patient['tattoo_id'],"Espèce":self.patient['species'],"Date":dat,"Oeil":lat,"Stimulus":met.get('flash_color','WHITE'), "Commentaires":self.txt_comments.toPlainText()}
+                with pd.ExcelWriter(path) as w: pd.DataFrame(list({**info, **met}.items()), columns=["Param", "Valeur"]).to_excel(w, sheet_name="Résumé", index=False); pd.read_csv(csv).to_excel(w, sheet_name="Raw_Data", index=False)
                 QMessageBox.information(self, self.tr("Succès"), self.tr("Export Excel réussi."))
             except Exception as e: QMessageBox.critical(self, self.tr("Erreur"), str(e))
-
     def _load_macros(self):
         self.combo_macros.blockSignals(True); self.combo_macros.clear(); self.combo_macros.addItem(self.tr("--- Insérer phrase type ---"))
         for m in self.db.get_macros(): self.combo_macros.addItem(m['content'][:60], m['content'])
         self.combo_macros.blockSignals(False)
     def _insert_macro(self, idx):
         if idx > 0: self.txt_comments.append(self.combo_macros.itemData(idx)); self.combo_macros.setCurrentIndex(0)
-    
     def _settings(self): d = SettingsDialog(self, self.conf); d.settings_changed.connect(self._apply_set); d.exec(); self._load_macros()
     def _apply_set(self, s):
         idx = int(s.get("camera", {}).get("index", 0))
         if self.camera_thread and self.camera_thread.camera_index != idx: self.reset_camera(); return
         if self.camera_thread:
-            d=s.get('detection',{}); self.camera_thread.camera.roi_w=int(d.get('roi_width',400)); self.camera_thread.camera.roi_h=int(d.get('roi_height',400))
-            self.camera_thread.camera.roi_off_x=int(d.get('roi_offset_x',0)); self.camera_thread.camera.roi_off_y=int(d.get('roi_offset_y',0))
-            self.camera_thread.set_threshold(int(d.get('canny_threshold1',50)))
+            d=s.get('detection',{}); self.camera_thread.camera.roi_w=int(d.get('roi_width',400)); self.camera_thread.camera.roi_h=int(d.get('roi_height',400)); self.camera_thread.camera.roi_off_x=int(d.get('roi_offset_x',0)); self.camera_thread.camera.roi_off_y=int(d.get('roi_offset_y',0)); self.camera_thread.set_threshold(int(d.get('canny_threshold1',50)))
     def _calib(self): (CalibrationDialog(self.camera_thread.camera, self).exec() if self.camera_thread else None)
     def return_to_home(self): self.stop_camera(); self.w=WelcomeScreen(); self.w.patient_selected.connect(lambda p:[self.w.close(), MainWindow(p).show()]); self.w.show(); self.close()
-    def _show_about(self): QMessageBox.about(self, "Infos", "PLR V3.22")
+    def _show_about(self): QMessageBox.about(self, "Infos", "PLR V3.28")
     def stop_camera(self): (self.camera_thread.stop() if self.camera_thread else None)
     def closeEvent(self, e):
-        try:
-            det = self.conf.config.get("detection", {})
-            det["canny_threshold1"] = self.controls.st.value(); det["gaussian_blur"] = self.controls.sb.value()
-            self.conf.config["detection"] = det; self.conf.save()
+        try: det = self.conf.config.get("detection", {}); det["canny_threshold1"] = self.controls.st.value(); det["gaussian_blur"] = self.controls.sb.value(); self.conf.config["detection"] = det; self.conf.save()
         except: pass
         self.stop_camera(); e.accept()
 
 def main():
     os.makedirs("data/plr_results", exist_ok=True)
     app = QApplication(sys.argv); app.setStyle("Fusion")
-    
-    # --- APPLIQUER LE STYLE ---
     apply_modern_theme(app)
-    # --------------------------
-    
     conf = ConfigManager()
     lang = conf.get("general", "language", "fr")
     if lang != "fr":
         trans = QTranslator()
-        if trans.load(f"translations/app_{lang}.qm"):
-            app.installTranslator(trans)
-
+        if trans.load(f"translations/app_{lang}.qm"): app.installTranslator(trans)
     global win; win = None 
     w = WelcomeScreen()
     def launch(p): global win; win = MainWindow(p); win.show()
