@@ -14,8 +14,8 @@
         "height": 480
     },
     "detection": {
-        "canny_threshold1": 29,
-        "gaussian_blur": 8,
+        "canny_threshold1": 41,
+        "gaussian_blur": 9,
         "roi_width": 400,
         "roi_height": 200,
         "roi_offset_x": 0,
