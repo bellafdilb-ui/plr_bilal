@@ -6,11 +6,16 @@ Interface Examen V3.28 (Historique : Nettoyage couleurs et Francisation).
 
 import sys
 import os
+# Imports explicites pour forcer la détection par PyInstaller
+import shiboken6
+import PySide6
+
 import cv2
 import numpy as np
 import json
 from datetime import datetime
 import logging
+from typing import Optional, Dict, Any
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -56,25 +61,66 @@ class FlashOverlay(QWidget):
         self.update()
 
 class CameraThread(QThread):
-    frame_ready = Signal(np.ndarray); pupil_detected = Signal(dict); fps_updated = Signal(float); error_occurred = Signal(str); camera_started = Signal()
-    def __init__(self, camera_index=0): super().__init__(); self.camera=None; self.camera_index=camera_index; self.running=False
-    def run(self):
+    """
+    Thread dédié à la capture vidéo pour ne pas bloquer l'interface graphique.
+    Gère le cycle de vie de CameraEngine.
+    """
+    frame_ready = Signal(np.ndarray)
+    pupil_detected = Signal(dict)
+    fps_updated = Signal(float)
+    error_occurred = Signal(str)
+    camera_started = Signal()
+
+    def __init__(self, camera_index: int = 0):
+        super().__init__()
+        self.camera: Optional[CameraEngine] = None
+        self.camera_index = camera_index
+        self.running = False
+
+    def run(self) -> None:
+        """Boucle principale du thread."""
         try:
-            self.camera=CameraEngine(self.camera_index)
-            if not self.camera.is_ready(): raise Exception("Impossible d'initialiser la caméra.\nEst-elle bien branchée ?")
-            self.running=True; self.camera_started.emit()
+            self.camera = CameraEngine(self.camera_index)
+            if not self.camera.is_ready():
+                raise Exception("Impossible d'initialiser la caméra.\nEst-elle bien branchée ?")
+            
+            self.running = True
+            self.camera_started.emit()
+            
             while self.running: 
-                f,p=self.camera.grab_and_detect()
-                if f is None: raise Exception("Perte du signal vidéo (Déconnexion).")
-                self.frame_ready.emit(f); (self.pupil_detected.emit(p) if p else None); self.msleep(1)
-        except Exception as e: self.error_occurred.emit(str(e))
-        finally: (self.camera.release() if self.camera else None)
-    def stop(self): self.running=False; self.wait(2000)
-    def set_threshold(self,v): (self.camera.set_threshold(v) if self.camera else None)
-    def set_blur(self,v): (self.camera.set_blur_kernel(v) if self.camera else None)
-    def set_display_mode(self,m): (self.camera.set_display_mode(m) if self.camera else None)
-    def start_recording(self,f): (self.camera.start_csv_recording(f) if self.camera else None)
-    def stop_recording(self): (self.camera.stop_csv_recording() if self.camera else None)
+                frame, pupil_data = self.camera.grab_and_detect()
+                if frame is None:
+                    raise Exception("Perte du signal vidéo (Déconnexion).")
+                
+                self.frame_ready.emit(frame)
+                if pupil_data:
+                    self.pupil_detected.emit(pupil_data)
+                
+                self.msleep(1)
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+        finally:
+            if self.camera:
+                self.camera.release()
+
+    def stop(self):
+        self.running = False
+        self.wait(2000)
+
+    def set_threshold(self, v: int):
+        if self.camera: self.camera.set_threshold(v)
+
+    def set_blur(self, v: int):
+        if self.camera: self.camera.set_blur_kernel(v)
+
+    def set_display_mode(self, m: str):
+        if self.camera: self.camera.set_display_mode(m)
+
+    def start_recording(self, f: str):
+        if self.camera: self.camera.start_csv_recording(f)
+
+    def stop_recording(self):
+        if self.camera: self.camera.stop_csv_recording()
 
 class VideoWidget(QLabel):
     def __init__(self): super().__init__(); self.setAlignment(Qt.AlignCenter); self.setStyleSheet("background:black; border:2px solid #444;"); self.setMinimumSize(400,300)
@@ -84,7 +130,13 @@ class VideoWidget(QLabel):
         except: pass
 
 class ControlPanel(QWidget):
-    threshold_changed=Signal(int); blur_changed=Signal(int); display_mode_changed=Signal(str); test_requested=Signal(); settings_requested=Signal(); reset_camera_requested=Signal()
+    threshold_changed = Signal(int)
+    blur_changed = Signal(int)
+    display_mode_changed = Signal(str)
+    test_requested = Signal()
+    settings_requested = Signal()
+    reset_camera_requested = Signal()
+
     def __init__(self): super().__init__(); self.setup_ui()
     def setup_ui(self):
         l=QVBoxLayout(self); l.setSpacing(10)
@@ -109,8 +161,8 @@ class ControlPanel(QWidget):
         gc=QGroupBox(self.tr("Stimulus Chromatique")); hc=QHBoxLayout(); self.cg=QButtonGroup(self)
         self.rc_blue = QRadioButton(self.tr("Bleu")); self.rc_blue.setStyleSheet("color:#007bff; font-weight:bold;")
         self.rc_red = QRadioButton(self.tr("Rouge")); self.rc_red.setStyleSheet("color:#dc3545; font-weight:bold;")
-        self.rc_white = QRadioButton(self.tr("Blanc")); self.rc_white.setStyleSheet("color:#555;")
-        self.rc_blue.setChecked(True)
+        self.rc_white = QRadioButton(self.tr("Achromatique")); self.rc_white.setStyleSheet("color:#555; font-weight:bold;")
+        self.rc_white.setChecked(True)
         self.cg.addButton(self.rc_blue); self.cg.addButton(self.rc_red); self.cg.addButton(self.rc_white)
         hc.addWidget(self.rc_blue); hc.addWidget(self.rc_red); hc.addWidget(self.rc_white)
         gc.setLayout(hc); l.addWidget(gc)
@@ -129,16 +181,16 @@ class ControlPanel(QWidget):
         self.br=QPushButton(self.tr("🔄 Réinit. Caméra")); self.br.setStyleSheet("background:#e67e22;color:white;padding:5px;border-radius:4px;"); self.br.clicked.connect(self.reset_camera_requested.emit)
         l.addWidget(self.bt); l.addWidget(self.pb); l.addWidget(self.br); l.addStretch()
         
-    def _on_mode(self,t): 
+    def _on_mode(self, t: str): 
         mode = "normal"
         if "ROI" in t: mode="roi"
         elif "Binaire" in t or "Binary" in t: mode="binary"
         elif "Mosa" in t: mode="mosaic"
         self.display_mode_changed.emit(mode)
         
-    def get_selected_eye(self): return "OD" if self.rod.isChecked() else "OG"
+    def get_selected_eye(self) -> str: return "OD" if self.rod.isChecked() else "OG"
     
-    def get_selected_color(self): 
+    def get_selected_color(self) -> str: 
         if self.rc_blue.isChecked(): return "BLUE"
         if self.rc_red.isChecked(): return "RED"
         return "WHITE"
@@ -192,7 +244,7 @@ class MainWindow(QMainWindow):
         self.hardware.connect_device()
 
     def _apply_default_color(self):
-        def_col = self.conf.get("protocol", "default_color", "BLUE")
+        def_col = self.conf.get("protocol", "default_color", "WHITE")
         if def_col == "BLUE": self.controls.rc_blue.setChecked(True)
         elif def_col == "RED": self.controls.rc_red.setChecked(True)
         else: self.controls.rc_white.setChecked(True)
@@ -223,8 +275,11 @@ class MainWindow(QMainWindow):
         self.btn_pdf = QPushButton(self.tr("📄 EXPORT PDF")); self.btn_pdf.clicked.connect(self.export_pdf)
         self.btn_excel = QPushButton(self.tr("📊 EXPORT DATA")); self.btn_excel.clicked.connect(self.export_excel)
         self.btn_excel.setStyleSheet("background:#ff9800;color:white;font-weight:bold;padding:5px;")
+        self.btn_compare = QPushButton(self.tr("🆚 Comparer OD/OG")); self.btn_compare.clicked.connect(self.auto_compare_eyes)
+        self.btn_compare.setStyleSheet("background:#6f42c1;color:white;font-weight:bold;padding:5px;")
+        
         self.btn_update_comment.setStyleSheet("background:#007bff;color:white;font-weight:bold;padding:5px;"); self.btn_pdf.setStyleSheet("background:#17a2b8;color:white;font-weight:bold;padding:5px;")
-        hl_act.addWidget(self.btn_save); hl_act.addWidget(self.btn_discard); hl_act.addWidget(self.btn_update_comment); hl_act.addWidget(self.btn_pdf); hl_act.addWidget(self.btn_excel)
+        hl_act.addWidget(self.btn_save); hl_act.addWidget(self.btn_discard); hl_act.addWidget(self.btn_update_comment); hl_act.addWidget(self.btn_pdf); hl_act.addWidget(self.btn_excel); hl_act.addWidget(self.btn_compare)
         self.grp_actions.setLayout(hl_act); self.grp_actions.setVisible(False)
         
         self.grp_com = QGroupBox(self.tr("Rapport / Commentaires")); vl_com = QVBoxLayout(); hl_mac = QHBoxLayout()
@@ -286,7 +341,9 @@ class MainWindow(QMainWindow):
         self.current_color = self.controls.get_selected_color()
         
         self.hardware.send_flash_command(self.current_color, int(flash_s * 1000))
-        self.engine.start_test(f"{self.patient['name']}_{self.current_laterality}_{self.current_color}")
+        # Assainissement du nom pour éviter les erreurs de fichier (ex: accents, slashs)
+        safe_name = "".join([c if c.isalnum() else "_" for c in self.patient['name']])
+        self.engine.start_test(f"{safe_name}_{self.current_laterality}_{self.current_color}")
         self.controls.setEnabled(False)
 
     def on_test_finished(self, meta):
@@ -294,7 +351,14 @@ class MainWindow(QMainWindow):
         self.controls.set_button_running(False)
         self.controls.setEnabled(True)
         self.controls.pb.setFormat(self.tr("Terminé"))
-        if os.path.getsize(meta['csv_path']) < 100: return
+        
+        # Vérification explicite si le fichier est vide ou inexistant
+        if not os.path.exists(meta['csv_path']) or os.path.getsize(meta['csv_path']) < 100:
+            QMessageBox.warning(self, self.tr("Données insuffisantes"), 
+                                self.tr("Aucune donnée n'a été enregistrée.\n\nVérifiez que :\n1. La pupille est bien détectée (cercle vert).\n2. L'enregistrement n'a pas été interrompu."))
+            self._set_ui_state("IDLE")
+            return
+            
         an = PLRAnalyzer(); an.load_data(meta['csv_path']); an.preprocess()
         met = an.analyze(flash_timestamp=meta['flash_timestamp'])
         met['flash_timestamp'] = meta['flash_timestamp']; met['flash_duration_s'] = meta['config']['flash_duration_ms'] / 1000.0; met['flash_color'] = self.current_color 
@@ -336,6 +400,48 @@ class MainWindow(QMainWindow):
         elif item and action == action_xls: self.selected_historical_exam = ex_data; self.export_excel()
         elif item and action == action_del: self.delete_history_item(ex_data)
 
+    def auto_compare_eyes(self):
+        """Sélectionne automatiquement le dernier examen de l'autre œil pour comparaison."""
+        # 1. Déterminer la latéralité de référence
+        ref_lat = None
+        if self.temp_result_meta and not self.selected_historical_exam:
+            ref_lat = self.current_laterality
+        elif self.selected_historical_exam:
+            ref_lat = self.selected_historical_exam.get('laterality')
+        
+        if not ref_lat: return
+
+        target_lat = 'OG' if ref_lat == 'OD' else 'OD'
+        found = False
+
+        # 2. Parcourir l'historique pour trouver le dernier examen de l'autre œil
+        self.table_hist.blockSignals(True)
+        for r in range(self.table_hist.rowCount()):
+            item_lat = self.table_hist.item(r, 1)
+            item_chk = self.table_hist.item(r, 5)
+            
+            # On décoche tout d'abord pour avoir une vue propre
+            item_chk.setCheckState(Qt.Unchecked)
+            
+            # Si on trouve le premier match (le plus récent car trié par date DESC)
+            if not found and item_lat.text() == target_lat:
+                item_chk.setCheckState(Qt.Checked)
+                found = True
+                
+            # Si on est en mode Historique, il faut aussi cocher l'examen qu'on regardait
+            if self.selected_historical_exam:
+                ex_data = item_chk.data(Qt.UserRole)
+                if ex_data['id'] == self.selected_historical_exam['id']:
+                    item_chk.setCheckState(Qt.Checked)
+
+        self.table_hist.blockSignals(False)
+        
+        if found:
+            self._update_comparison_graph()
+            self.status.showMessage(self.tr("Comparaison OD/OG activée."))
+        else:
+            QMessageBox.information(self, self.tr("Info"), self.tr("Aucun examen de l'autre œil trouvé pour comparaison."))
+
     def batch_selection(self, mode):
         self.table_hist.blockSignals(True)
         for r in range(self.table_hist.rowCount()):
@@ -376,15 +482,16 @@ class MainWindow(QMainWindow):
 
     def _set_ui_state(self, state):
         self.btn_save.setVisible(False); self.btn_discard.setVisible(False)
-        self.btn_update_comment.setVisible(False); self.btn_pdf.setVisible(False); self.btn_excel.setVisible(False)
+        self.btn_update_comment.setVisible(False); self.btn_pdf.setVisible(False); self.btn_excel.setVisible(False); self.btn_compare.setVisible(False)
         if state == "IDLE":
             self.grp_actions.setVisible(False); self.txt_comments.clear()
-            self.graph_widget.axes.clear(); self.graph_widget.canvas.draw(); self.temp_result_meta = None
+            # Utilisation de la méthode propre clear() qui réinitialise aussi les annotations
+            self.graph_widget.clear(); self.temp_result_meta = None
         elif state == "NEW_RESULT":
-            self.grp_actions.setVisible(True); self.btn_save.setVisible(True); self.btn_discard.setVisible(True); self.btn_pdf.setVisible(True); self.btn_excel.setVisible(True)
+            self.grp_actions.setVisible(True); self.btn_save.setVisible(True); self.btn_discard.setVisible(True); self.btn_pdf.setVisible(True); self.btn_excel.setVisible(True); self.btn_compare.setVisible(True)
             self.grp_actions.setTitle(self.tr("Nouveau Résultat (Non enregistré)")); self.grp_actions.setStyleSheet("background-color:#e3f2fd; font-weight:bold;")
         elif state == "HISTORY_VIEW":
-            self.grp_actions.setVisible(True); self.btn_update_comment.setVisible(True); self.btn_pdf.setVisible(True); self.btn_excel.setVisible(True)
+            self.grp_actions.setVisible(True); self.btn_update_comment.setVisible(True); self.btn_pdf.setVisible(True); self.btn_excel.setVisible(True); self.btn_compare.setVisible(True)
             self.grp_actions.setTitle(self.tr("Examen Historique")); self.grp_actions.setStyleSheet("background-color:#f0f4c3; font-weight:bold;")
 
     def start_camera(self):
@@ -518,7 +625,10 @@ class MainWindow(QMainWindow):
 
 def main():
     os.makedirs("data/plr_results", exist_ok=True)
-    app = QApplication(sys.argv); app.setStyle("Fusion")
+    app = QApplication.instance()
+    if not app:
+        app = QApplication(sys.argv)
+    app.setStyle("Fusion")
     apply_modern_theme(app)
     conf = ConfigManager()
     lang = conf.get("general", "language", "fr")

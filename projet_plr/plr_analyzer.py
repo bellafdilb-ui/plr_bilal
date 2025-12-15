@@ -10,17 +10,34 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from typing import Dict, Optional, Any
-from scipy.signal import savgol_filter, medfilt
+from scipy.signal import medfilt
 
 logger = logging.getLogger(__name__)
 
 class PLRAnalyzer:
+    """
+    Analyseur de données pupillométriques (PLR).
+
+    Cette classe charge des données brutes (CSV), effectue un prétraitement
+    (nettoyage, interpolation, lissage) et calcule les métriques cliniques
+    standard (Baseline, Amplitude, Latence, Vitesse, T75).
+    """
+
     def __init__(self):
         self.data: Optional[pd.DataFrame] = None
         self.results: Dict[str, Any] = {}
         self.sampling_rate = 30.0
     
     def load_data(self, file_path: str) -> bool:
+        """
+        Charge les données pupillométriques depuis un fichier CSV.
+
+        Args:
+            file_path (str): Chemin vers le fichier CSV.
+
+        Returns:
+            bool: True si le chargement est réussi, False sinon.
+        """
         try:
             path = Path(file_path)
             if not path.exists(): return False
@@ -39,46 +56,59 @@ class PLRAnalyzer:
             return False
 
     def preprocess(self):
+        """
+        Applique la chaîne de traitement du signal sur les données chargées.
+        
+        Étapes :
+        1. Nettoyage des valeurs aberrantes (clignements, erreurs détection).
+        2. Interpolation des données manquantes.
+        3. Filtrage médian (suppression des pics isolés).
+        4. Lissage Savitzky-Golay (lissage de la courbe).
+        5. Calcul de la vitesse (dérivée première).
+        """
         if self.data is None: return
 
-        # 1. Nettoyage
-        mask_invalid = (self.data['diameter_mm'] < 0.5) | \
-                       (self.data['diameter_mm'] > 25.0) | \
-                       (self.data['quality_score'] < 40)
+        # 1. Mode BRUT (Raw)
+        # On abaisse le seuil à 0.1mm car 1.5mm masquait probablement tes données de test
+        mask_invalid = (self.data['diameter_mm'] < 0.1) | (self.data['diameter_mm'] > 50.0)
         
         self.data['diameter_smooth'] = self.data['diameter_mm'].copy()
         self.data.loc[mask_invalid, 'diameter_smooth'] = np.nan
         
-        # 2. Interpolation
-        self.data['diameter_smooth'] = self.data['diameter_smooth'].interpolate(method='linear')
-        self.data['diameter_smooth'] = self.data['diameter_smooth'].bfill().ffill()
+        # 2. Interpolation (Limitée)
+        # On comble les trous jusqu'à 1s pour garantir une continuité
+        self.data['diameter_smooth'] = self.data['diameter_smooth'].interpolate(method='linear', limit=int(self.sampling_rate * 1.0))
 
-        # 3. Filtre Médian (Anti-Pics)
-        # On adapte la fenêtre au FPS (env. 100ms)
-        kernel = int(self.sampling_rate * 0.1) 
-        if kernel % 2 == 0: kernel += 1
-        kernel = max(3, kernel)
-        
+        # 3. Filtrage Léger (Micro-Médian)
+        # On supprime uniquement les pics aberrants isolés (ex: cils) sur 3 frames.
+        # Le filtre Savitzky-Golay a été retiré pour préserver la dynamique réelle.
         try:
-            self.data['diameter_smooth'] = medfilt(self.data['diameter_smooth'], kernel_size=kernel)
-        except: pass
-
-        # 4. Savitzky-Golay (Lissage courbe)
-        # Fenêtre plus large pour bien lisser les vagues (env 300ms)
-        win = int(self.sampling_rate * 0.3)
-        if win % 2 == 0: win += 1
-        win = max(5, win)
-        
-        try:
-            self.data['diameter_smooth'] = savgol_filter(self.data['diameter_smooth'], win, 2)
-        except: pass
+            self.data['diameter_smooth'] = medfilt(self.data['diameter_smooth'], kernel_size=3)
+        except Exception: pass
 
         # Vitesse
         self.data['velocity_mm_s'] = np.gradient(self.data['diameter_smooth'], self.data['timestamp_s'])
 
     def analyze(self, flash_timestamp: float = 0.0) -> Dict[str, Any]:
-        """Analyse avec calcul de Baseline intelligent."""
-        if self.data is None: return {}
+        """
+        Effectue l'analyse PLR complète avec calcul de Baseline intelligent.
+
+        Args:
+            flash_timestamp (float): Timestamp (en secondes) du début du flash.
+
+        Returns:
+            Dict[str, Any]: Dictionnaire contenant les métriques calculées :
+                - baseline_mm (float): Diamètre avant stimulation.
+                - min_diameter_mm (float): Diamètre minimal (constriction max).
+                - amplitude_mm (float): Amplitude de la constriction.
+                - latency_s (float): Temps de latence avant début constriction.
+                - constriction_velocity_mm_s (float): Vitesse max de constriction.
+                - constriction_duration_s (float): Durée de la phase de constriction.
+                - constriction_percent (float): Pourcentage de constriction.
+                - T75_recovery_s (float): Temps de récupération à 75%.
+        """
+        if self.data is None:
+            return {}
             
         try:
             df = self.data

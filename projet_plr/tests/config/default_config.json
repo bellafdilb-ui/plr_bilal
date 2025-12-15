@@ -1,0 +1,26 @@
+{
+    "general": {
+        "language": "fr"
+    },
+    "camera": {
+        "index": 0,
+        "width": 640,
+        "height": 480
+    },
+    "detection": {
+        "canny_threshold1": 50,
+        "gaussian_blur": 5,
+        "roi_width": 400,
+        "roi_height": 400
+    },
+    "protocol": {
+        "baseline_duration": 2.0,
+        "flash_duration_ms": 200,
+        "response_duration": 5.0,
+        "flash_count": 1,
+        "default_color": "WHITE"
+    },
+    "recording": {
+        "save_path": "recordings"
+    }
+}

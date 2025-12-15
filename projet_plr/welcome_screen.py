@@ -319,9 +319,14 @@ class WelcomeScreen(QMainWindow):
         self.patient_selected.emit(p_data)
         self.close()
 
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
+def main():
+    app = QApplication.instance()
+    if not app:
+        app = QApplication(sys.argv)
     apply_modern_theme(app) # Application du style au démarrage direct
     w = WelcomeScreen()
     w.show()
     sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()

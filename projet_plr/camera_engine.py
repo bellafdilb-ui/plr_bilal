@@ -8,12 +8,20 @@ import cv2
 import numpy as np
 import time
 import logging
+from typing import Optional, Tuple, Dict, Any
 from settings_dialog import ConfigManager
 
 logger = logging.getLogger(__name__)
 
 class CameraEngine:
-    def __init__(self, camera_index=0):
+    """
+    Moteur de capture vidéo et de traitement d'image pour la pupillométrie.
+    
+    Gère l'acquisition caméra, le prétraitement (ROI, flou, seuillage),
+    la détection de contours et l'enregistrement des données.
+    """
+
+    def __init__(self, camera_index: int = 0):
         self.camera_index = camera_index
         self.cap = None
         self.config_manager = ConfigManager()
@@ -42,6 +50,7 @@ class CameraEngine:
         self.load_config()
 
     def open_camera(self):
+        """Tente d'ouvrir la caméra avec différents backends (DSHOW, MSMF, ANY)."""
         print(f"[CAMERA] Ouverture index {self.camera_index}...")
         
         backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
@@ -75,6 +84,7 @@ class CameraEngine:
             print(f"[CAMERA] Erreur config : {e}")
 
     def load_config(self):
+        """Charge les paramètres de détection depuis le ConfigManager."""
         det = self.config_manager.config.get("detection", {})
         self.threshold_val = int(det.get("canny_threshold1", 50))
         self.blur_val = int(det.get("gaussian_blur", 5))
@@ -84,17 +94,29 @@ class CameraEngine:
         self.roi_off_y = int(det.get("roi_offset_y", 0))
 
     def release(self):
+        """Libère les ressources (caméra et fichier CSV)."""
         self.stop_csv_recording()
-        if self.cap: self.cap.release()
+        if self.cap:
+            self.cap.release()
 
-    def is_ready(self):
+    def is_ready(self) -> bool:
+        """Vérifie si la caméra est ouverte et prête."""
         return self.cap is not None and self.cap.isOpened()
 
-    def set_threshold(self, val): self.threshold_val = val
-    def set_blur_kernel(self, val): self.blur_val = val if val % 2 != 0 else val + 1
-    def set_display_mode(self, mode): self.display_mode = mode
+    def set_threshold(self, val: int):
+        """Définit le seuil de binarisation."""
+        self.threshold_val = val
 
-    def start_csv_recording(self, filepath): 
+    def set_blur_kernel(self, val: int):
+        """Définit la taille du noyau de flou (doit être impair)."""
+        self.blur_val = val if val % 2 != 0 else val + 1
+
+    def set_display_mode(self, mode: str):
+        """Change le mode d'affichage ('normal', 'roi', 'binary', 'mosaic')."""
+        self.display_mode = mode
+
+    def start_csv_recording(self, filepath: str): 
+        """Démarre l'enregistrement des données pupillométriques dans un CSV."""
         try:
             self.stop_csv_recording()
             self.csv_file = open(filepath, 'w')
@@ -107,17 +129,28 @@ class CameraEngine:
             self.recording = False
 
     def stop_csv_recording(self):
+        """Arrête l'enregistrement CSV et ferme le fichier."""
         self.recording = False
         time.sleep(0.02)
         
         # --- PROTECTION CONTRE L'ERREUR 'NO ATTRIBUTE' ---
         if hasattr(self, 'csv_file') and self.csv_file:
             try: 
-                if not self.csv_file.closed: self.csv_file.close()
+                if not self.csv_file.closed:
+                    self.csv_file.close()
             except: pass
             self.csv_file = None
 
-    def get_roi_rect(self, w, h):
+    def get_roi_rect(self, w: int, h: int) -> Tuple[int, int, int, int]:
+        """
+        Calcule les coordonnées du rectangle de la ROI (Region of Interest).
+
+        Args:
+            w (int): Largeur totale de l'image.
+            h (int): Hauteur totale de l'image.
+        Returns:
+            Tuple[int, int, int, int]: (x1, y1, x2, y2)
+        """
         if w == 0 or h == 0: return 0,0,0,0
         cx = (w // 2) + self.roi_off_x
         cy = (h // 2) + self.roi_off_y
@@ -126,11 +159,22 @@ class CameraEngine:
         x2, y2 = min(w, int(cx + hw)), min(h, int(cy + hh))
         return x1, y1, x2, y2
 
-    def grab_and_detect(self):
+    def grab_and_detect(self) -> Tuple[Optional[np.ndarray], Optional[Dict[str, Any]]]:
+        """
+        Capture une frame, applique le traitement d'image et détecte la pupille.
+
+        Returns:
+            Tuple[Optional[np.ndarray], Optional[Dict[str, Any]]]:
+                - L'image traitée pour affichage (BGR).
+                - Un dictionnaire contenant les données de la pupille (ou None).
+        """
         if not self.is_ready(): return None, None
         
-        ret, raw_frame = self.cap.read()
-        if not ret: return None, None
+        try:
+            ret, raw_frame = self.cap.read()
+            if not ret: return None, None
+        except Exception:
+            return None, None
         
         now = time.time()
         if (now - self.last_time) > 0: self.fps = 1.0 / (now - self.last_time)

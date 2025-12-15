@@ -28,7 +28,7 @@ class ConfigManager:
                 "general": {"language": "fr"},
                 "camera": {"index": 0, "width": 640, "height": 480}, 
                 "detection": {"canny_threshold1": 50, "gaussian_blur": 5, "roi_width":400, "roi_height":400},
-                "protocol": {"baseline_duration": 2.0, "flash_duration_ms": 200, "response_duration": 5.0, "flash_count": 1, "default_color": "BLUE"},
+                "protocol": {"baseline_duration": 2.0, "flash_duration_ms": 200, "response_duration": 5.0, "flash_count": 1, "default_color": "WHITE"},
                 "recording": {"save_path": "recordings"}
             }
             self.save(default_conf)
@@ -92,7 +92,7 @@ class SettingsDialog(QDialog):
         self.combo_def_color = QComboBox()
         self.combo_def_color.addItem(self.tr("Bleu (480nm)"), "BLUE")
         self.combo_def_color.addItem(self.tr("Rouge (630nm)"), "RED")
-        self.combo_def_color.addItem(self.tr("Blanc"), "WHITE")
+        self.combo_def_color.addItem(self.tr("Achromatique (Blanc)"), "WHITE")
 
         fl.addRow(self.tr("1. Baseline:"), self.spin_baseline)
         fl.addRow(self.tr("2. Flash:"), self.spin_flash_s)

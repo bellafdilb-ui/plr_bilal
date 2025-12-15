@@ -3,6 +3,7 @@ tests/test_engine.py
 Test de la logique de séquençage (avec Mock Caméra).
 """
 import pytest
+import time
 from plr_test_engine import PLRTestEngine
 
 # --- LE MOCK (La Doublure) ---
@@ -64,3 +65,20 @@ def test_engine_start_stop(tmp_path):
     
     # Verdict : Le moteur a-t-il bien dit à la caméra de s'arrêter ?
     assert fake_cam.is_recording is False
+
+def test_run_sequence_logic():
+    """Test direct de la séquence (sans thread) pour couverture."""
+    fake_cam = MockCamera()
+    engine = PLRTestEngine(fake_cam)
+    
+    # Config très courte pour que le test soit rapide
+    engine.configure(baseline_duration=0.1, flash_count=1, 
+                     flash_duration_ms=10, response_duration=0.1)
+    
+    engine.is_running = True
+    
+    # On appelle directement la méthode privée _run_sequence
+    # Attention : cela bloque pendant ~0.7s (0.5s stab + durées)
+    engine._run_sequence()
+    
+    assert fake_cam.is_recording is False # Doit être arrêté à la fin

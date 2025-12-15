@@ -6,11 +6,19 @@ Moteur de test PLR V2 (Support Flash en Secondes).
 
 import time
 import logging
+from typing import Dict, Any, Optional
 from PySide6.QtCore import QObject, Signal
 
 logger = logging.getLogger(__name__)
 
 class PLRTestEngine(QObject):
+    """
+    Moteur d'exécution du protocole de test PLR (Pupillary Light Reflex).
+    
+    Gère la séquence temporelle : Baseline -> Flash -> Réponse.
+    Synchronise l'enregistrement caméra et le déclenchement du flash.
+    """
+
     flash_triggered = Signal(bool)  
     test_finished = Signal(dict)    
     progress_updated = Signal(float, str) 
@@ -27,8 +35,17 @@ class PLRTestEngine(QObject):
         self.response_duration = 5.0
         self.ref_name = "test"
 
-    def configure(self, baseline_duration=2.0, flash_count=1, flash_duration_ms=200, response_duration=5.0):
-        """Configure le protocole."""
+    def configure(self, baseline_duration: float = 2.0, flash_count: int = 1, 
+                  flash_duration_ms: int = 200, response_duration: float = 5.0) -> None:
+        """
+        Configure les paramètres temporels du protocole.
+
+        Args:
+            baseline_duration (float): Durée d'enregistrement avant le flash (sec).
+            flash_count (int): Nombre de répétitions du flash.
+            flash_duration_ms (int): Durée du flash en millisecondes.
+            response_duration (float): Durée d'enregistrement après le flash (sec).
+        """
         self.baseline_duration = baseline_duration
         self.flash_count = flash_count
         # Conversion ms -> s pour cohérence interne
@@ -37,7 +54,13 @@ class PLRTestEngine(QObject):
         
         logger.info(f"Protocole : Base={self.baseline_duration}s, Flash={self.flash_duration_s}s, Tot={self.baseline_duration+self.flash_duration_s+self.response_duration}s")
 
-    def start_test(self, reference_name):
+    def start_test(self, reference_name: str) -> None:
+        """
+        Lance la séquence de test dans un thread séparé.
+
+        Args:
+            reference_name (str): Identifiant unique pour nommer le fichier CSV.
+        """
         self.ref_name = reference_name
         self.is_running = True
         
@@ -48,6 +71,7 @@ class PLRTestEngine(QObject):
         t.start()
 
     def stop_test(self):
+        """Arrête proprement la séquence en cours et l'enregistrement."""
         self.is_running = False
         if self.camera:
             self.camera.stop_csv_recording()
@@ -65,6 +89,9 @@ class PLRTestEngine(QObject):
             logger.info("Démarrage enregistrement...")
             self.camera.start_csv_recording(filename)
             
+            # PAUSE DE STABILISATION (0.5s)
+            # Permet d'éviter que les premières millisecondes soient vides ou instables
+            time.sleep(0.5)
             start_time = time.time()
             
             # 2. Boucle des Flashs

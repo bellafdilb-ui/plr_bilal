@@ -37,7 +37,7 @@ class PLRGraphWidget(QWidget):
         layout.setSpacing(0)
         
         self.current_data_list = [] 
-        self.show_raw = False       
+        self.display_mode = 'smooth' # 'smooth' ou 'raw'
         self.current_df = None      
         self.cursors = [] 
         self.is_erasing = False 
@@ -58,13 +58,15 @@ class PLRGraphWidget(QWidget):
         self._init_annotation()
         
         self.mpl_toolbar = NavigationToolbar(self.canvas, self)
-        self.chk_raw = QCheckBox("Voir Bruit (Brut)")
-        self.chk_raw.setStyleSheet("font-weight: bold; color: #555;")
-        self.chk_raw.toggled.connect(self.set_show_raw)
+        
+        self.btn_mode = QPushButton("Mode: LISSÉ")
+        self.btn_mode.setCheckable(True); self.btn_mode.setChecked(True)
+        self.btn_mode.setStyleSheet("background-color: #28a745; color: white; font-weight: bold; padding: 5px;")
+        self.btn_mode.clicked.connect(self.toggle_mode)
         
         tb_layout.addWidget(self.mpl_toolbar)
         tb_layout.addStretch()
-        tb_layout.addWidget(self.chk_raw)
+        tb_layout.addWidget(self.btn_mode)
         
         layout.addWidget(toolbar_container)
         layout.addWidget(self.canvas)
@@ -82,9 +84,16 @@ class PLRGraphWidget(QWidget):
         )
         self.hover_annot.set_visible(False)
 
-    def set_show_raw(self, enabled: bool):
-        self.show_raw = enabled
-        if self.current_data_list: self.refresh_plot(clear=True)
+    def toggle_mode(self):
+        if self.btn_mode.isChecked():
+            self.display_mode = 'smooth'
+            self.btn_mode.setText("Mode: LISSÉ")
+            self.btn_mode.setStyleSheet("background-color: #28a745; color: white; font-weight: bold; padding: 5px;")
+        else:
+            self.display_mode = 'raw'
+            self.btn_mode.setText("Mode: BRUT")
+            self.btn_mode.setStyleSheet("background-color: #e67e22; color: white; font-weight: bold; padding: 5px;")
+        self.refresh_plot(clear=True)
 
     def plot_data(self, data_list: List[Dict], clear=True):
         self.current_data_list = data_list
@@ -109,8 +118,13 @@ class PLRGraphWidget(QWidget):
             if self.current_df is None and i == 0: self.current_df = df
             t = df['timestamp_s']
             
-            if self.show_raw: self.axes.plot(t, df['diameter_mm'], color='#999999', linewidth=1, alpha=0.4, label='_nolegend_')
-            self.axes.plot(t, df.get('diameter_smooth', df['diameter_mm']), label=item.get('label',''), color=item.get('color'), linestyle=item.get('style','-'), linewidth=2)
+            # Choix de la colonne selon le mode
+            col_name = 'diameter_smooth' if self.display_mode == 'smooth' else 'diameter_mm'
+            y_data = df.get(col_name, df['diameter_mm'])
+            
+            # Style : Points plus visibles en mode brut
+            marker_style = '.' if self.display_mode == 'raw' else None
+            self.axes.plot(t, y_data, label=item.get('label',''), color=item.get('color'), linestyle=item.get('style','-'), linewidth=1.5, marker=marker_style, markersize=4)
             
             metrics = item.get('metrics', {})
             ft = metrics.get('flash_timestamp', item.get('flash_timestamp'))
@@ -146,7 +160,8 @@ class PLRGraphWidget(QWidget):
             t_col = self.current_df['timestamp_s']
             idx = (np.abs(t_col - event.xdata)).argmin()
             t_snap = t_col.iloc[idx]
-            d_val = self.current_df.get('diameter_smooth', self.current_df['diameter_mm']).iloc[idx]
+            col_name = 'diameter_smooth' if self.display_mode == 'smooth' else 'diameter_mm'
+            d_val = self.current_df.get(col_name, self.current_df['diameter_mm']).iloc[idx]
             
             # 2. Position : Sur la souris
             self.hover_annot.xy = (event.xdata, event.ydata)
@@ -188,7 +203,8 @@ class PLRGraphWidget(QWidget):
         t_col = self.current_df['timestamp_s']
         idx = (np.abs(t_col - x_click)).argmin()
         t_snap = t_col.iloc[idx]
-        d_val = self.current_df.get('diameter_smooth', self.current_df['diameter_mm']).iloc[idx]
+        col_name = 'diameter_smooth' if self.display_mode == 'smooth' else 'diameter_mm'
+        d_val = self.current_df.get(col_name, self.current_df['diameter_mm']).iloc[idx]
 
         l = self.axes.axvline(x=t_snap, color='#e74c3c', linestyle='-', linewidth=1)
         
@@ -210,6 +226,11 @@ class PLRGraphWidget(QWidget):
         self.canvas.draw()
     def clear_all_cursors(self):
         for c in list(self.cursors): self.remove_specific_cursor(c)
+
+    def clear(self):
+        """Nettoie complètement le graphique et réinitialise les données."""
+        self.current_data_list = []
+        self.refresh_plot(clear=True)
 
 class PLRResultsDialog(QDialog):
     def __init__(self, parent=None, data=None, results=None, title="Détail Examen"):
