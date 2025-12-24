@@ -113,6 +113,12 @@ class PLRAnalyzer:
         try:
             df = self.data
             
+            # --- SYNCHRONISATION BLACK FRAME ---
+            t0_synchro = self.detect_t0_from_black_frame()
+            if t0_synchro is not None:
+                flash_timestamp = t0_synchro
+                logger.info(f"Synchronisation Black Frame détectée à T={flash_timestamp:.3f}s")
+            
             # --- CALCUL DE BASELINE INTELLIGENT ---
             # Au lieu de faire la moyenne de tout le début (qui peut monter),
             # on prend la médiane des 0.3 dernières secondes AVANT le flash.
@@ -197,6 +203,20 @@ class PLRAnalyzer:
         except Exception as e:
             logger.error(f"Erreur analyse : {e}")
             return {}
+
+    def detect_t0_from_black_frame(self) -> Optional[float]:
+        """Détecte le T0 précis grâce au marqueur 'Black Frame' (chute luminosité)."""
+        if self.data is None or 'brightness' not in self.data.columns: return None
+        
+        # On cherche les frames où la luminosité est < 10 (seuil défini dans camera_engine)
+        black_indices = self.data.index[self.data['brightness'] < 10.0].tolist()
+        if not black_indices: return None
+        
+        # Le T0 officiel est la frame SUIVANT la première frame noire (Flash + IR ON)
+        first_idx = black_indices[0]
+        if first_idx + 1 < len(self.data):
+            return self.data.iloc[first_idx + 1]['timestamp_s']
+        return None
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

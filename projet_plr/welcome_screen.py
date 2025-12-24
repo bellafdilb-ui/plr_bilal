@@ -167,7 +167,6 @@ class WelcomeScreen(QMainWindow):
         self.btn_start.setFixedHeight(50)
         self.btn_start.setStyleSheet("background-color: #28a745; color: white; font-weight: bold; font-size: 14px;")
         self.btn_start.clicked.connect(self.start_exam_process)
-        self.btn_start.setEnabled(False)
         
         v_start.addWidget(self.btn_start)
         self.grp_start.setLayout(v_start)
@@ -220,7 +219,6 @@ class WelcomeScreen(QMainWindow):
         self.grp_identity.setTitle(self.tr("👤 Édition : {name}").format(name=p['name']))
         self.btn_save.setText(self.tr("💾 Mettre à jour"))
         self.btn_delete.setVisible(True)
-        self.btn_start.setEnabled(True)
         self.load_history(p['id'])
 
     def mode_create_new(self):
@@ -233,7 +231,6 @@ class WelcomeScreen(QMainWindow):
         self.grp_identity.setTitle(self.tr("✨ Nouveau Patient"))
         self.btn_save.setText(self.tr("💾 Créer Fiche"))
         self.btn_delete.setVisible(False)
-        self.btn_start.setEnabled(False)
         self.table_history.setRowCount(0)
 
     def load_history(self, pid):
@@ -309,7 +306,9 @@ class WelcomeScreen(QMainWindow):
         self.lbl_age.setText(txt)
 
     def start_exam_process(self):
-        if not self.current_patient_id: return
+        if not self.current_patient_id:
+            QMessageBox.warning(self, self.tr("Attention"), self.tr("Veuillez sélectionner un patient ou en créer un nouveau avant d'ouvrir le dossier."))
+            return
         p_data = {
             'id': self.current_patient_id,
             'name': self.inp_name.text(),
