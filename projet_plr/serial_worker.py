@@ -12,6 +12,7 @@ class SerialWorker(QThread):
     """
     # Signal émis quand une ligne de texte est reçue (ex: 'TRIG')
     data_received = Signal(str)
+    connection_lost = Signal()
 
     def __init__(self, port_name, baud_rate=115000):
         super().__init__()
@@ -45,6 +46,10 @@ class SerialWorker(QThread):
                     else:
                         time.sleep(0.05) # Petite pause pour ne pas surcharger le CPU
                         
+                except (OSError, serial.SerialException):
+                    logger.error("Perte de connexion série (Déconnexion physique ?)")
+                    self.connection_lost.emit()
+                    break
                 except Exception as e:
                     logger.error(f"Erreur lecture série : {e}")
                     time.sleep(0.1)

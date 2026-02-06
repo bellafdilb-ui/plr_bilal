@@ -74,7 +74,7 @@ class PLRTestEngine(QObject):
         """Arrête proprement la séquence en cours et l'enregistrement."""
         self.is_running = False
         if self.camera:
-            self.camera.stop_csv_recording()
+            self.camera.stop_recording()
 
     def _run_sequence(self):
         try:
@@ -84,10 +84,10 @@ class PLRTestEngine(QObject):
 
             # 1. Préparation Fichier
             timestamp = time.strftime("%Y%m%d_%H%M%S")
-            filename = f"data/plr_results/{timestamp}_{self.ref_name}.csv"
+            base_path = f"data/plr_results/{timestamp}_{self.ref_name}"
             
             logger.info("Démarrage enregistrement...")
-            self.camera.start_csv_recording(filename)
+            self.camera.start_recording(base_path)
             
             # PAUSE DE STABILISATION (0.5s)
             # Permet d'éviter que les premières millisecondes soient vides ou instables
@@ -130,7 +130,8 @@ class PLRTestEngine(QObject):
             
             # Métadonnées pour l'analyseur
             meta = {
-                'csv_path': filename,
+                'csv_path': base_path + ".csv",
+                'video_path': base_path + "_frames", # Pointe vers le dossier d'images
                 'flash_timestamp': flash_ts,
                 'config': {
                     'baseline_duration': self.baseline_duration,

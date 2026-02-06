@@ -9,14 +9,17 @@ import logging
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, List, Optional
+import cv2
+import os
+import glob
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, 
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QFrame, QCheckBox, QSpacerItem, QSizePolicy
+    QFrame, QCheckBox, QSpacerItem, QSizePolicy, QSlider, QGroupBox
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QImage, QPixmap
 
 import matplotlib
 matplotlib.use('QtAgg')
@@ -167,7 +170,7 @@ class PLRGraphWidget(QWidget):
             self.hover_annot.xy = (event.xdata, event.ydata)
             
             # 3. Texte Français
-            self.hover_annot.set_text(f"Temps : {t_snap:.2f} s\nDiamètre : {d_val:.2f} mm")
+            self.hover_annot.set_text(f"Temps : {t_snap:.2f} s\nDiamètre : {d_val:.1f} mm")
             
             # 4. Positionnement intelligent
             xlim = self.axes.get_xlim()
@@ -213,7 +216,7 @@ class PLRGraphWidget(QWidget):
         ha='right' if t_snap>mid_x else 'left'; va='top' if d_val>mid_y else 'bottom'
         off_x=-20 if ha=='right' else 20; off_y=-20 if va=='top' else 20
 
-        an = self.axes.annotate(f" {t_snap:.2f} s \n {d_val:.2f} mm ", xy=(t_snap,d_val), xytext=(off_x,off_y), textcoords="offset points", 
+        an = self.axes.annotate(f" {t_snap:.2f} s \n {d_val:.1f} mm ", xy=(t_snap,d_val), xytext=(off_x,off_y), textcoords="offset points", 
                                 color='white', fontsize=9, fontweight='bold', bbox=dict(boxstyle="round,pad=0.3", fc="#e74c3c", ec="none", alpha=0.8),
                                 horizontalalignment=ha, verticalalignment=va, arrowprops=dict(arrowstyle="-", color='#e74c3c'))
         dt, = self.axes.plot(t_snap, d_val, 'o', color='#e74c3c', markersize=5)
@@ -232,37 +235,118 @@ class PLRGraphWidget(QWidget):
         self.current_data_list = []
         self.refresh_plot(clear=True)
 
-class PLRResultsDialog(QDialog):
-    def __init__(self, parent=None, data=None, results=None, title="Détail Examen"):
-        super().__init__(parent)
-        self.setWindowTitle(title)
-        self.resize(1100, 750)
+class VideoPlayerWidget(QWidget):
+    """Lecteur capable de lire un dossier d'images ou un fichier vidéo."""
+    def __init__(self, video_path):
+        super().__init__()
+        self.video_path = video_path
+        self.mode = "unknown"
+        self.image_files = []
+        self.cap = None
+        
+        # Détection du type de source
+        if os.path.isdir(video_path):
+            self.mode = "images"
+            # Récupération des images triées
+            self.image_files = sorted(glob.glob(os.path.join(video_path, "*.jpg")))
+            self.total_frames = len(self.image_files)
+        else:
+            self.mode = "video"
+            self.cap = cv2.VideoCapture(video_path)
+            self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
         layout = QVBoxLayout(self)
+        
+        self.lbl_video = QLabel("Vidéo non disponible")
+        self.lbl_video.setAlignment(Qt.AlignCenter)
+        self.lbl_video.setMinimumSize(320, 240)
+        self.lbl_video.setStyleSheet("background: black; border: 1px solid #555;")
+        layout.addWidget(self.lbl_video)
+        
+        ctrl_layout = QHBoxLayout()
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(0, max(0, self.total_frames - 1))
+        self.slider.valueChanged.connect(self.seek_frame)
+        
+        btn_prev = QPushButton("◀"); btn_prev.setFixedWidth(30); btn_prev.clicked.connect(lambda: self.slider.setValue(self.slider.value()-1))
+        btn_next = QPushButton("▶"); btn_next.setFixedWidth(30); btn_next.clicked.connect(lambda: self.slider.setValue(self.slider.value()+1))
+        
+        self.lbl_frame = QLabel("0 / 0")
+        
+        ctrl_layout.addWidget(btn_prev)
+        ctrl_layout.addWidget(self.slider)
+        ctrl_layout.addWidget(btn_next)
+        ctrl_layout.addWidget(self.lbl_frame)
+        layout.addLayout(ctrl_layout)
+        
+        if self.total_frames > 0:
+            self.seek_frame(0)
+            
+    def seek_frame(self, frame_idx):
+        frame = None
+        
+        if self.mode == "images":
+            if 0 <= frame_idx < len(self.image_files):
+                path = self.image_files[frame_idx]
+                frame = cv2.imread(path)
+        elif self.mode == "video":
+            if self.cap and self.cap.isOpened():
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, f = self.cap.read()
+                if ret: frame = f
+            
+        if frame is not None:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = frame.shape
+            img = QImage(frame.data, w, h, ch * w, QImage.Format_RGB888)
+            self.lbl_video.setPixmap(QPixmap.fromImage(img).scaled(self.lbl_video.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            self.lbl_frame.setText(f"{frame_idx} / {self.total_frames}")
+
+class PLRResultsDialog(QDialog):
+    def __init__(self, parent=None, data=None, results=None, title="Détail Examen", video_path=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(1200, 800)
+        
+        main_layout = QHBoxLayout(self)
+        
+        # COLONNE GAUCHE : Graphique + Tableau
+        left_col = QWidget(); left_layout = QVBoxLayout(left_col)
+        
         lbl_info = QLabel("<i>💡 Clic Gauche : Poser curseur | Maintenir Clic Droit : Gommer</i>")
         lbl_info.setStyleSheet("color: #666; margin-bottom: 5px;")
-        layout.addWidget(lbl_info)
+        left_layout.addWidget(lbl_info)
         
         self.graph = PLRGraphWidget()
         curve_data = {'label': 'Examen', 'df': data, 'metrics': results, 'color': '#007bff'}
         self.graph.plot_data([curve_data])
-        layout.addWidget(self.graph, stretch=3)
+        left_layout.addWidget(self.graph, stretch=3)
         
         h_btn = QHBoxLayout()
         btn_clean = QPushButton("🗑️ Effacer curseurs")
         btn_clean.setFixedWidth(150)
         btn_clean.clicked.connect(self.graph.clear_all_cursors)
         h_btn.addWidget(btn_clean); h_btn.addStretch()
-        layout.addLayout(h_btn)
+        left_layout.addLayout(h_btn)
         
         self.table = QTableWidget()
         self.table.setColumnCount(2)
         self.table.setHorizontalHeaderLabels(["Métrique", "Valeur"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        layout.addWidget(self.table, stretch=1)
+        left_layout.addWidget(self.table, stretch=1)
         
         if results:
             self.table.setRowCount(len(results))
             for i, (k, v) in enumerate(results.items()):
                 self.table.setItem(i, 0, QTableWidgetItem(str(k)))
                 self.table.setItem(i, 1, QTableWidgetItem(str(v)))
+        
+        main_layout.addWidget(left_col, stretch=2)
+        
+        # COLONNE DROITE : Vidéo (si dispo)
+        if video_path:
+            right_col = QGroupBox("Film de l'examen"); right_layout = QVBoxLayout(right_col)
+            self.player = VideoPlayerWidget(video_path)
+            right_layout.addWidget(self.player)
+            right_layout.addStretch()
+            main_layout.addWidget(right_col, stretch=1)

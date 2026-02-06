@@ -294,8 +294,9 @@ class WelcomeScreen(QMainWindow):
             results = exam.get('results_data', {})
             lat = exam.get('laterality', '')
             date = exam['exam_date']
+            video_path = exam.get('video_path', '')
             title = self.tr("Examen du {date} - {lat}").format(date=date, lat=lat)
-            d = PLRResultsDialog(self, data=df, results=results, title=title)
+            d = PLRResultsDialog(self, data=df, results=results, title=title, video_path=video_path)
             d.exec()
         except: pass
 

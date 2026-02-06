@@ -1,14 +1,15 @@
 {
     "general": {
-        "language": "fr"
+        "language": "fr",
+        "enable_beep": true
     },
     "protocol": {
         "baseline_duration": 1.0,
-        "flash_duration_ms": 500,
-        "response_duration": 6.5,
+        "flash_duration_ms": 1000,
+        "response_duration": 6.0,
         "flash_count": 1,
         "default_color": "WHITE",
-        "flash_intensity": 5000,
+        "flash_intensity": 64000,
         "flash_frequency": 0.1,
         "ambiance_intensity": 0
     },
@@ -18,10 +19,10 @@
         "height": 480
     },
     "detection": {
-        "canny_threshold1": 20,
-        "gaussian_blur": 21,
+        "canny_threshold1": 53,
+        "gaussian_blur": 15,
         "roi_width": 400,
-        "roi_height": 200,
+        "roi_height": 400,
         "roi_offset_x": 0,
         "roi_offset_y": 0
     },

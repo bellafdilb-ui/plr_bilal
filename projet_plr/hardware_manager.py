@@ -68,6 +68,7 @@ class HardwareManager(QObject):
             
             self.worker = SerialWorker(selected_port)
             self.worker.data_received.connect(self._on_data_received)
+            self.worker.connection_lost.connect(self._on_connection_lost)
             self.worker.start()
             
             # Attendre que le port soit physiquement ouvert (Fix Race Condition)
@@ -178,6 +179,7 @@ class HardwareManager(QObject):
             logger.info(">>> HARDWARE : SÉQUENCE SYNCHRO (Black Frame) <<<")
             # 1. Couper l'IR (Création de la frame noire)
             self.command_queue.append("Type : commande, Commande :arret_eclairage_ir")
+            # Le timer de 100ms dans _send_next_command va créer le délai nécessaire ici
             # 2. Lancer le flash (Le délai inter-commande de 100ms crée le trou noir)
             self.command_queue.append("Type : commande, Commande :depart_flash")
             
@@ -224,6 +226,11 @@ class HardwareManager(QObject):
         # Détection de la version
         if "version" in data.lower():
             self.firmware_received.emit(data)
+
+    def _on_connection_lost(self):
+        """Gère la perte brutale de connexion (ex: câble débranché)."""
+        logger.warning("Hardware déconnecté inopinément.")
+        self.disconnect_device()
 
     def simulate_trigger_press(self):
         """Appelé par la touche ESPACE pour simuler le clic gâchette."""

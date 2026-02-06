@@ -100,10 +100,10 @@ class CameraThread(QThread):
         if self.camera: self.camera.set_display_mode(m)
 
     def start_recording(self, f: str):
-        if self.camera: self.camera.start_csv_recording(f)
+        if self.camera: self.camera.start_recording(f)
 
     def stop_recording(self):
-        if self.camera: self.camera.stop_csv_recording()
+        if self.camera: self.camera.stop_recording()
 
 class VideoWidget(QLabel):
     def __init__(self): super().__init__(); self.setAlignment(Qt.AlignCenter); self.setStyleSheet("background:black; border:2px solid #444;"); self.setMinimumSize(400,300)
@@ -121,21 +121,12 @@ class ControlPanel(QWidget):
     reset_camera_requested = Signal()
     reset_hardware_requested = Signal()
     color_changed = Signal(str)
+    intensity_changed = Signal(int)
 
     def __init__(self): super().__init__(); self.setup_ui()
     def setup_ui(self):
         l=QVBoxLayout(self); l.setSpacing(10)
         
-        # INDICATEURS
-        h_ind = QHBoxLayout()
-        self.lbl_cam_status = QLabel(self.tr("Caméra: ?"))
-        self.lbl_cam_status.setAlignment(Qt.AlignCenter); self.lbl_cam_status.setFixedHeight(30)
-        self.lbl_hw_status = QLabel(self.tr("Appareil: ?"))
-        self.lbl_hw_status.setAlignment(Qt.AlignCenter); self.lbl_hw_status.setFixedHeight(30)
-        self.lbl_hw_status.setStyleSheet("background-color: #e2e3e5; color: #383d41; border: 1px solid #d6d8db; border-radius: 5px; font-weight: bold;")
-        h_ind.addWidget(self.lbl_cam_status); h_ind.addWidget(self.lbl_hw_status)
-        l.addLayout(h_ind)
-
         # CHOIX OEIL
         ge=QGroupBox(self.tr("Choix de l'Œil")); he=QHBoxLayout(); self.eg=QButtonGroup(self)
         self.rod=QRadioButton(self.tr("OD (Droit)")); self.rod.setStyleSheet("color:#d32f2f;font-weight:bold;"); self.rod.setChecked(True)
@@ -152,6 +143,13 @@ class ControlPanel(QWidget):
         hc.addWidget(self.rc_blue); hc.addWidget(self.rc_red); hc.addWidget(self.rc_white)
         gc.setLayout(hc); l.addWidget(gc)
         self.cg.buttonClicked.connect(lambda: self.color_changed.emit(self.get_selected_color()))
+
+        # INTENSITE FLASH
+        gi=QGroupBox(self.tr("Intensité Flash")); li=QVBoxLayout()
+        self.lbl_intensity=QLabel("100 %"); self.lbl_intensity.setAlignment(Qt.AlignCenter); self.lbl_intensity.setStyleSheet("font-weight:bold;")
+        self.slider_intensity=QSlider(Qt.Horizontal); self.slider_intensity.setRange(0,100); self.slider_intensity.setValue(100)
+        self.slider_intensity.valueChanged.connect(self._on_intensity_change)
+        li.addWidget(self.lbl_intensity); li.addWidget(self.slider_intensity); gi.setLayout(li); l.addWidget(gi)
 
         # REGLAGES
         gs=QGroupBox(self.tr("Réglages Caméra")); fl=QVBoxLayout()
@@ -175,28 +173,16 @@ class ControlPanel(QWidget):
         elif "Mosa" in t: mode="mosaic"
         self.display_mode_changed.emit(mode)
         
+    def _on_intensity_change(self, v): self.lbl_intensity.setText(f"{v} %"); self.intensity_changed.emit(v)
+    def get_intensity_percent(self): return self.slider_intensity.value()
+    def set_intensity_percent(self, v): self.slider_intensity.setValue(v)
+
     def get_selected_eye(self) -> str: return "OD" if self.rod.isChecked() else "OG"
     
     def get_selected_color(self) -> str: 
         if self.rc_blue.isChecked(): return "BLUE"
         if self.rc_red.isChecked(): return "RED"
         return "WHITE"
-
-    def set_camera_status(self, connected: bool):
-        if connected:
-            self.lbl_cam_status.setText(self.tr("✅ CAM"))
-            self.lbl_cam_status.setStyleSheet("background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; border-radius: 5px; font-weight: bold;")
-        else:
-            self.lbl_cam_status.setText(self.tr("❌ CAM"))
-            self.lbl_cam_status.setStyleSheet("background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; border-radius: 5px; font-weight: bold;")
-
-    def set_hardware_status(self, connected: bool):
-        if connected:
-            self.lbl_hw_status.setText(self.tr("✅ HW"))
-            self.lbl_hw_status.setStyleSheet("background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; border-radius: 5px; font-weight: bold;")
-        else:
-            self.lbl_hw_status.setText(self.tr("❌ HW"))
-            self.lbl_hw_status.setStyleSheet("background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; border-radius: 5px; font-weight: bold;")
 
     def set_button_running(self, running):
         if running:
@@ -225,6 +211,11 @@ class MainWindow(QMainWindow):
         self.hardware.connection_status_changed.connect(self.on_hardware_status_changed)
         self.hardware.flash_fired.connect(self.on_hardware_flash_fired)
         
+        # Timer pour la reconnexion automatique du matériel
+        self.hw_reconnect_timer = QTimer(self)
+        self.hw_reconnect_timer.setInterval(3000) # Tentative toutes les 3 secondes
+        self.hw_reconnect_timer.timeout.connect(self.try_auto_reconnect_hw)
+
         self.is_camera_ready = False
         self.is_test_running = False 
         self.is_hardware_ready = False
@@ -241,9 +232,8 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(self.tr("Dossier Patient : {name} ({species})").format(name=self.patient['name'], species=self.patient['species']))
             self.load_patient_history()
             
-        if self.connect_hardware_with_progress():
-            QMessageBox.information(self, self.tr("Connexion Matériel"), self.tr("Le dispositif est bien connecté sur le port {}").format(self.hardware.current_port))
-            self._send_initial_hardware_config()
+        # Tentative de connexion silencieuse au démarrage. Le timer gère les échecs.
+        self.hardware.connect_device()
 
     def check_ready_state(self):
         """Active le bouton 'Lancer' uniquement si tout est prêt."""
@@ -265,13 +255,33 @@ class MainWindow(QMainWindow):
 
     def setup_ui(self):
         self.resize(1400, 950)
-        central = QWidget(); self.setCentralWidget(central); main_lay = QHBoxLayout(central)
+        central = QWidget(); self.setCentralWidget(central)
+        main_lay = QVBoxLayout(central) # Layout principal Vertical
         
+        # --- BARRE DE STATUT SUPÉRIEURE ---
+        top_bar = QHBoxLayout()
+        top_bar.setContentsMargins(5, 5, 5, 10)
+        
+        self.lbl_cam_status = QLabel(self.tr("Caméra: ?"))
+        self.lbl_cam_status.setAlignment(Qt.AlignCenter); self.lbl_cam_status.setFixedSize(120, 35)
+        
+        self.lbl_hw_status = QLabel(self.tr("Appareil: ?"))
+        self.lbl_hw_status.setAlignment(Qt.AlignCenter); self.lbl_hw_status.setFixedSize(120, 35)
+        
+        top_bar.addWidget(self.lbl_cam_status); top_bar.addWidget(self.lbl_hw_status); top_bar.addStretch()
+        main_lay.addLayout(top_bar)
+        
+        # --- CONTENU PRINCIPAL ---
         left = QWidget(); ll = QVBoxLayout(left); ll.setContentsMargins(0,0,0,0)
         self.video = VideoWidget(); self.controls = ControlPanel()
         self.controls.threshold_changed.connect(lambda v: self.camera_thread.set_threshold(v))
         self.controls.blur_changed.connect(lambda v: self.camera_thread.set_blur(v))
         self.controls.display_mode_changed.connect(lambda m: self.camera_thread.set_display_mode(m))
+        
+        p = self.conf.config.get("protocol", {})
+        self.controls.set_intensity_percent(int((p.get("flash_intensity", 65536)/65536.0)*100))
+        self.controls.intensity_changed.connect(self.update_hardware_params)
+        
         self.controls.test_requested.connect(self.start_test)
         self.controls.reset_camera_requested.connect(self.reset_camera)
         self.controls.reset_hardware_requested.connect(self.reset_hardware)
@@ -304,7 +314,7 @@ class MainWindow(QMainWindow):
         hl_mac.addWidget(self.combo_macros); hl_mac.addStretch(); self.txt_comments = QTextEdit(); self.txt_comments.setPlaceholderText(self.tr("Observations...")); self.txt_comments.setMaximumHeight(80); vl_com.addLayout(hl_mac); vl_com.addWidget(self.txt_comments); self.grp_com.setLayout(vl_com)
 
         self.grp_hist = QGroupBox(self.tr("Historique")); vl_hist = QVBoxLayout()
-        self.table_hist = QTableWidget(0, 6); self.table_hist.setHorizontalHeaderLabels([self.tr("Date & Heure"),self.tr("Oeil"),self.tr("Stim"),self.tr("Type"),self.tr("Note"),self.tr("Comp")])
+        self.table_hist = QTableWidget(0, 8); self.table_hist.setHorizontalHeaderLabels([self.tr("Date & Heure"),self.tr("Oeil"),self.tr("Stim"),self.tr("Type"),self.tr("Durée"),self.tr("Intensité (%)"), "", ""])
         self.table_hist.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table_hist.setSelectionBehavior(QAbstractItemView.SelectRows); self.table_hist.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table_hist.setSortingEnabled(True); self.table_hist.setContextMenuPolicy(Qt.CustomContextMenu); self.table_hist.customContextMenuRequested.connect(self.show_history_menu); self.table_hist.itemClicked.connect(self.on_history_clicked); vl_hist.addWidget(self.table_hist); self.grp_hist.setLayout(vl_hist)
@@ -312,7 +322,10 @@ class MainWindow(QMainWindow):
         bl.addWidget(self.grp_actions); bl.addWidget(self.grp_com); bl.addWidget(self.grp_hist)
         right_split.addWidget(self.graph_widget); right_split.addWidget(bottom_w); right_split.setStretchFactor(0, 5); right_split.setStretchFactor(1, 5)
         
-        main_lay.addWidget(QSplitter(Qt.Horizontal)); main_lay.itemAt(0).widget().addWidget(left); main_lay.itemAt(0).widget().addWidget(right_split); main_lay.itemAt(0).widget().setSizes([500,900])
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(left); splitter.addWidget(right_split); splitter.setSizes([500,900])
+        
+        main_lay.addWidget(splitter)
         
         self.status = QStatusBar(); self.setStatusBar(self.status)
         self.lbl_flash_indicator = QLabel("⚡ FLASH")
@@ -320,6 +333,22 @@ class MainWindow(QMainWindow):
         self.lbl_flash_indicator.setVisible(False)
         self.status.addPermanentWidget(self.lbl_flash_indicator)
         self._create_menu(); self.load_patient_history(); self._set_ui_state("IDLE")
+
+    def set_camera_status(self, connected: bool):
+        if connected:
+            self.lbl_cam_status.setText(self.tr("✅ CAM"))
+            self.lbl_cam_status.setStyleSheet("background-color: #d4edda; color: #155724; border: 2px solid #c3e6cb; border-radius: 5px; font-weight: bold; font-size: 14px;")
+        else:
+            self.lbl_cam_status.setText(self.tr("❌ CAM"))
+            self.lbl_cam_status.setStyleSheet("background-color: #f8d7da; color: #721c24; border: 2px solid #f5c6cb; border-radius: 5px; font-weight: bold; font-size: 14px;")
+
+    def set_hardware_status(self, connected: bool):
+        if connected:
+            self.lbl_hw_status.setText(self.tr("✅ HW"))
+            self.lbl_hw_status.setStyleSheet("background-color: #d4edda; color: #155724; border: 2px solid #c3e6cb; border-radius: 5px; font-weight: bold; font-size: 14px;")
+        else:
+            self.lbl_hw_status.setText(self.tr("❌ HW"))
+            self.lbl_hw_status.setStyleSheet("background-color: #f8d7da; color: #721c24; border: 2px solid #f5c6cb; border-radius: 5px; font-weight: bold; font-size: 14px;")
 
     # --- SIMULATION GÂCHETTE CLAVIER ---
     def keyPressEvent(self, event: QKeyEvent):
@@ -345,7 +374,7 @@ class MainWindow(QMainWindow):
         self.selected_historical_exam = None
         
         p = self.conf.config.get("protocol", {})
-        base = p.get("baseline_duration", 2.0); flash_s = p.get("flash_duration_ms", 200) / 1000.0; resp = p.get("response_duration", 5.0); count = p.get("flash_count", 1)
+        base = p.get("baseline_duration", 2.0); flash_s = p.get("flash_duration_ms", 200) / 1000.0; resp = p.get("response_duration", 5.0); count = 1
         self.controls.pb.setRange(0, int((base + flash_s + resp)*count*10))
         self.engine.configure(baseline_duration=base, flash_count=count, flash_duration_ms=int(flash_s*1000), response_duration=resp)
         self.current_laterality = self.controls.get_selected_eye()
@@ -353,6 +382,9 @@ class MainWindow(QMainWindow):
         
         # Assainissement du nom pour éviter les erreurs de fichier (ex: accents, slashs)
         safe_name = "".join([c if c.isalnum() else "_" for c in self.patient['name']])
+        # Sécurité : Si le nom est vide ou ne contient que des underscores (ex: "!!!")
+        if not safe_name.replace("_", ""):
+            safe_name = f"Patient_{self.patient.get('id', 'Unknown')}"
         self.engine.start_test(f"{safe_name}_{self.current_laterality}_{self.current_color}")
         self.controls.setEnabled(False)
 
@@ -381,13 +413,28 @@ class MainWindow(QMainWindow):
             self._set_ui_state("IDLE")
             return
             
-        an = PLRAnalyzer(); an.load_data(meta['csv_path']); an.preprocess()
+        an = PLRAnalyzer()
+        if not an.load_data(meta['csv_path']):
+            QMessageBox.warning(self, self.tr("Erreur"), self.tr("Impossible de lire le fichier de données :\n") + meta['csv_path'])
+            return
+        an.preprocess()
         met = an.analyze(flash_timestamp=meta['flash_timestamp'])
         met['flash_timestamp'] = meta['flash_timestamp']; met['flash_duration_s'] = meta['config']['flash_duration_ms'] / 1000.0; met['flash_color'] = self.current_color 
+        
+        # AJOUT: Durée exacte et Intensité
+        duration = 0.0
+        if an.data is not None and not an.data.empty:
+            duration = an.data['timestamp_s'].iloc[-1] - an.data['timestamp_s'].iloc[0]
+        met['total_duration_s'] = round(duration, 2)
+        met['flash_intensity_percent'] = self.controls.get_intensity_percent()
+        
         col = '#b71c1c' if self.current_laterality == 'OD' else '#0d47a1'
         self.graph_widget.plot_data([{'label': f'Actuel ({self.current_laterality})', 'df': an.data, 'metrics': met, 'color': col}], clear=True)
         self.temp_result_meta = {'csv': meta['csv_path'], 'metrics': met}
+        # Sauvegarde temporaire du chemin vidéo pour l'enregistrement final
+        if 'video_path' in meta: self.temp_result_meta['video_path'] = meta['video_path']
         self._set_ui_state("NEW_RESULT")
+        self.grp_actions.setTitle(self.tr("Nouveau Résultat | Durée: {}s | Intensité: {}%").format(met['total_duration_s'], met['flash_intensity_percent']))
 
     # ... (Le reste : load_patient_history, save, export... reste identique) ...
     def _create_menu(self):
@@ -406,12 +453,15 @@ class MainWindow(QMainWindow):
         action_view = None; action_pdf = None; action_xls = None; action_del = None
         if item:
             self.table_hist.selectRow(item.row())
-            ex_data = self.table_hist.item(item.row(), 5).data(Qt.UserRole)
-            action_view = menu.addAction(self.tr("👁️ Voir / Éditer"))
-            action_pdf = menu.addAction(self.tr("📄 Exporter PDF"))
-            action_xls = menu.addAction(self.tr("📊 Exporter Excel (Data)"))
-            menu.addSeparator()
-            action_del = menu.addAction(self.tr("🗑️ Supprimer l'examen"))
+            chk_item = self.table_hist.item(item.row(), 7)
+            if chk_item:
+                ex_data = chk_item.data(Qt.UserRole)
+                action_view = menu.addAction(self.tr("👁️ Voir / Éditer"))
+                action_pdf = menu.addAction(self.tr("📄 Exporter PDF"))
+                action_xls = menu.addAction(self.tr("📊 Exporter Excel (Data)"))
+                menu.addSeparator()
+                action_del = menu.addAction(self.tr("🗑️ Supprimer l'examen"))
+            else: ex_data = None
         action = menu.exec(self.table_hist.mapToGlobal(pos))
         if action == act_all: self.batch_selection("ALL")
         elif action == act_none: self.batch_selection("NONE")
@@ -440,7 +490,7 @@ class MainWindow(QMainWindow):
         self.table_hist.blockSignals(True)
         for r in range(self.table_hist.rowCount()):
             item_lat = self.table_hist.item(r, 1)
-            item_chk = self.table_hist.item(r, 5)
+            item_chk = self.table_hist.item(r, 7)
             
             # On décoche tout d'abord pour avoir une vue propre
             item_chk.setCheckState(Qt.Unchecked)
@@ -467,7 +517,7 @@ class MainWindow(QMainWindow):
     def batch_selection(self, mode):
         self.table_hist.blockSignals(True)
         for r in range(self.table_hist.rowCount()):
-            item_chk = self.table_hist.item(r, 5); item_eye = self.table_hist.item(r, 1)
+            item_chk = self.table_hist.item(r, 7); item_eye = self.table_hist.item(r, 1)
             should = False
             if mode == "ALL": should = True
             elif mode == "NONE": should = False
@@ -484,8 +534,8 @@ class MainWindow(QMainWindow):
             col = '#b71c1c' if self.current_laterality == 'OD' else '#0d47a1'
             curves.append({'label': self.tr('Actuel'), 'df': an.data, 'metrics': self.temp_result_meta['metrics'], 'color': col})
         for r in range(self.table_hist.rowCount()):
-            if self.table_hist.item(r, 5).checkState() == Qt.Checked:
-                ex = self.table_hist.item(r, 5).data(Qt.UserRole)
+            if self.table_hist.item(r, 7).checkState() == Qt.Checked:
+                ex = self.table_hist.item(r, 7).data(Qt.UserRole)
                 try:
                     an = PLRAnalyzer(); an.load_data(ex['csv_path']); an.preprocess()
                     lat = ex.get('laterality', '?'); col = '#ff8a80' if lat == 'OD' else '#82b1ff'
@@ -525,13 +575,19 @@ class MainWindow(QMainWindow):
         self.camera_thread.camera_started.connect(self.init_engine)
         self.camera_thread.start()
 
-    def on_camera_started(self): self.is_camera_ready = True; self.controls.set_camera_status(True); self.check_ready_state()
-    def on_camera_error(self, err_msg): self.is_camera_ready = False; self.controls.set_camera_status(False); self.check_ready_state(); self.status.showMessage(self.tr("⚠️ Erreur Caméra")); QMessageBox.critical(self, self.tr("Erreur Caméra"), self.tr("Problème détecté :\n\n{err}\n\n👉 Vérifiez le branchement USB.\n👉 Cliquez ensuite sur '🔄 Réinit. Caméra'.").format(err=err_msg))
+    def on_camera_started(self): self.is_camera_ready = True; self.set_camera_status(True); self.check_ready_state()
+    def on_camera_error(self, err_msg): self.is_camera_ready = False; self.set_camera_status(False); self.check_ready_state(); self.status.showMessage(self.tr("⚠️ Erreur Caméra")); QMessageBox.critical(self, self.tr("Erreur Caméra"), self.tr("Problème détecté :\n\n{err}\n\n👉 Vérifiez le branchement USB.\n👉 Cliquez ensuite sur '🔄 Réinit. Caméra'.").format(err=err_msg))
     
     def on_hardware_status_changed(self, connected: bool):
         self.is_hardware_ready = connected
-        self.controls.set_hardware_status(connected)
-        self.status.showMessage(self.tr("Matériel connecté.") if connected else self.tr("Matériel déconnecté."))
+        self.set_hardware_status(connected)
+        if connected:
+            self.status.showMessage(self.tr("Matériel connecté sur le port {}.").format(self.hardware.current_port))
+            self.hw_reconnect_timer.stop()
+            self._send_initial_hardware_config()
+        else:
+            self.status.showMessage(self.tr("Matériel déconnecté. Recherche automatique..."))
+            self.hw_reconnect_timer.start()
         self.check_ready_state()
 
     def init_engine(self):
@@ -558,7 +614,7 @@ class MainWindow(QMainWindow):
         if active:
             self.hardware.lancer_sequence_synchro() # Séquence Synchro (Black Frame)
 
-    def reset_camera(self): self.status.showMessage(self.tr("Reset...")); self.is_camera_ready = False; self.controls.set_camera_status(False); self.check_ready_state(); self.stop_camera(); QTimer.singleShot(1000, self.start_camera)
+    def reset_camera(self): self.status.showMessage(self.tr("Reset...")); self.is_camera_ready = False; self.set_camera_status(False); self.check_ready_state(); self.stop_camera(); QTimer.singleShot(1000, self.start_camera)
     
     def reset_hardware(self):
         self.status.showMessage(self.tr("Connexion matériel..."))
@@ -567,6 +623,12 @@ class MainWindow(QMainWindow):
             self._send_initial_hardware_config()
         else:
             QMessageBox.warning(self, self.tr("Erreur Connexion"), self.tr("Impossible de connecter le dispositif.\nVérifiez le câble USB."))
+
+    def try_auto_reconnect_hw(self):
+        """Tente de reconnecter le matériel en arrière-plan si la connexion est perdue."""
+        if not self.is_hardware_ready:
+            logging.info("Tentative de reconnexion automatique du matériel...")
+            self.hardware.connect_device()
 
     def connect_hardware_with_progress(self):
         """Tente de connecter le matériel avec une fenêtre de progression."""
@@ -618,22 +680,62 @@ class MainWindow(QMainWindow):
             self.table_hist.setItem(r, 2, it_stim)
             
             self.table_hist.setItem(r, 3, QTableWidgetItem(ex.get('exam_type', 'PLR')))
-            self.table_hist.setItem(r, 4, QTableWidgetItem("📝" if ex.get('comments') else ""))
-            chk = QTableWidgetItem(); chk.setFlags(Qt.ItemIsUserCheckable|Qt.ItemIsEnabled); chk.setCheckState(Qt.Unchecked); chk.setData(Qt.UserRole, ex); self.table_hist.setItem(r, 5, chk)
+            
+            dur = res_data.get('total_duration_s', '-')
+            inte = res_data.get('flash_intensity_percent', '-')
+            self.table_hist.setItem(r, 4, QTableWidgetItem(f"{dur} s" if dur != '-' else "-"))
+            self.table_hist.setItem(r, 5, QTableWidgetItem(f"{inte} %" if inte != '-' else "-"))
+            
+            self.table_hist.setItem(r, 6, QTableWidgetItem("📝" if ex.get('comments') else ""))
+            chk = QTableWidgetItem(); chk.setFlags(Qt.ItemIsUserCheckable|Qt.ItemIsEnabled); chk.setCheckState(Qt.Unchecked); chk.setData(Qt.UserRole, ex); self.table_hist.setItem(r, 7, chk)
         self.table_hist.setSortingEnabled(True)
 
     def on_history_clicked(self, item):
-        if item.column() == 5: self._update_comparison_graph(); return
-        ex = self.table_hist.item(item.row(), 5).data(Qt.UserRole)
+        if item.column() == 7: self._update_comparison_graph(); return
+        chk_item = self.table_hist.item(item.row(), 7)
+        if chk_item is None: return
+        ex = chk_item.data(Qt.UserRole)
         self.selected_historical_exam = ex; self.temp_result_meta = None; self._set_ui_state("HISTORY_VIEW")
         self.txt_comments.setText(ex.get('comments', ''))
         try:
-            an = PLRAnalyzer(); an.load_data(ex['csv_path']); an.preprocess()
-            col = '#b71c1c' if ex.get('laterality') == 'OD' else '#0d47a1'
-            self.graph_widget.plot_data([{'label': f"{ex['exam_date']} ({ex.get('laterality')})", 'df': an.data, 'metrics': ex.get('results_data',{}), 'color': col}], clear=True)
-        except: pass
+            an = PLRAnalyzer()
+            if an.load_data(ex['csv_path']):
+                an.preprocess()
+                col = '#b71c1c' if ex.get('laterality') == 'OD' else '#0d47a1'
+                self.graph_widget.plot_data([{'label': f"{ex['exam_date']} ({ex.get('laterality')})", 'df': an.data, 'metrics': ex.get('results_data',{}), 'color': col}], clear=True)
+            else:
+                QMessageBox.warning(self, self.tr("Fichier introuvable"), self.tr("Le fichier de données semble avoir été déplacé ou supprimé :\n") + ex['csv_path'])
+        except Exception as e:
+            QMessageBox.critical(self, self.tr("Erreur"), f"Erreur lors de l'affichage : {str(e)}")
+
+    def open_frame_viewer(self):
+        path = QFileDialog.getExistingDirectory(self, self.tr("Sélectionner le dossier de frames"), "data/plr_results")
+        if path:
+            # Tentative de déduction du CSV associé pour afficher les courbes
+            csv_path = path
+            if csv_path.endswith("_frames"):
+                csv_path = csv_path[:-7] + ".csv"
+            
+            data = None
+            results = {}
+            
+            if os.path.exists(csv_path):
+                try:
+                    an = PLRAnalyzer()
+                    if an.load_data(csv_path):
+                        an.preprocess()
+                        data = an.data
+                        results = an.analyze()
+                except: pass
+            
+            d = PLRResultsDialog(self, data=data, results=results, title=self.tr("Visualiseur Frame par Frame"), video_path=path)
+            d.exec()
+
     def save_new_exam(self):
-        if self.temp_result_meta: self.db.save_exam(self.patient['id'], self.current_laterality, self.temp_result_meta['csv'], results=self.temp_result_meta['metrics'], comments=self.txt_comments.toPlainText()); self._set_ui_state("IDLE"); self.load_patient_history(); self.status.showMessage(self.tr("Sauvegardé."))
+        if self.temp_result_meta: 
+            vid = self.temp_result_meta.get('video_path', '')
+            self.db.save_exam(self.patient['id'], self.current_laterality, self.temp_result_meta['csv'], vid=vid, results=self.temp_result_meta['metrics'], comments=self.txt_comments.toPlainText())
+            self._set_ui_state("IDLE"); self.load_patient_history(); self.status.showMessage(self.tr("Sauvegardé."))
     def update_historical_comment(self):
         if self.selected_historical_exam:
             new = self.txt_comments.toPlainText(); eid = self.selected_historical_exam['id']
@@ -679,6 +781,10 @@ class MainWindow(QMainWindow):
         if self.camera_thread:
             d=s.get('detection',{}); self.camera_thread.camera.roi_w=int(d.get('roi_width',400)); self.camera_thread.camera.roi_h=int(d.get('roi_height',400)); self.camera_thread.camera.roi_off_x=int(d.get('roi_offset_x',0)); self.camera_thread.camera.roi_off_y=int(d.get('roi_offset_y',0)); self.camera_thread.set_threshold(int(d.get('canny_threshold1',50)))
         
+        p = s.get("protocol", {})
+        raw = p.get("flash_intensity", 65536)
+        self.controls.set_intensity_percent(int((raw/65536.0)*100))
+        
         # Mise à jour complète de la configuration hardware
         self.update_hardware_params()
 
@@ -692,10 +798,10 @@ class MainWindow(QMainWindow):
         
         p = self.conf.config.get("protocol", {})
         flash_s = p.get("flash_duration_ms", 200) / 1000.0
-        intensity = p.get("flash_intensity", 2000)
+        intensity = int((self.controls.get_intensity_percent() / 100.0) * 65536)
         frequency = p.get("flash_frequency", 0.1)
         ambiance = p.get("ambiance_intensity", 0)
-        count = p.get("flash_count", 1)
+        count = 1
         color = self.controls.get_selected_color()
         
         self.hardware.configure_flash_sequence(color, int(flash_s * 1000), intensity, frequency, ambiance, count)
@@ -708,6 +814,7 @@ class MainWindow(QMainWindow):
         try: det = self.conf.config.get("detection", {}); det["canny_threshold1"] = self.controls.st.value(); det["gaussian_blur"] = self.controls.sb.value(); self.conf.config["detection"] = det; self.conf.save()
         except: pass
         self.stop_camera()
+        self.hw_reconnect_timer.stop()
         if hasattr(self, 'hardware'): self.hardware.disconnect_device()
         e.accept()
 

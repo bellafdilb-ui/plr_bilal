@@ -101,7 +101,9 @@ class PDFGenerator:
             ("constriction_percent", "% Constriction"),
             ("constriction_velocity_mm_s", "Vitesse Max (mm/s)"),
             ("constriction_duration_s", "Durée Constriction (s)"),
-            ("T75_recovery_s", "T75 Récupération (s)")
+            ("T75_recovery_s", "T75 Récupération (s)"),
+            ("total_duration_s", "Durée Totale (s)"),
+            ("flash_intensity_percent", "Intensité Flash (%)")
         ]
 
         # On fait un tableau plus large mais moins haut (2 colonnes de données ?)
@@ -113,7 +115,7 @@ class PDFGenerator:
                 if key in results:
                     val = results[key]
                     val_str = str(val) if val is not None else "-"
-                    if key == "constriction_percent": val_str += " %"
+                    if key in ["constriction_percent", "flash_intensity_percent"]: val_str += " %"
                     elif "mm" in key and "velocity" not in key: val_str += " mm"
                     res_data.append([label, val_str])
         
