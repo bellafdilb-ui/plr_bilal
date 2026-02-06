@@ -1,0 +1,33 @@
+"""
+convert_doc.py
+Convertit un fichier HTML en PDF via Python.
+"""
+import os
+from xhtml2pdf import pisa
+
+def convert_html_to_pdf(source_html, output_pdf):
+    # Vérifier si le fichier existe
+    if not os.path.exists(source_html):
+        print(f"❌ Erreur : Le fichier {source_html} est introuvable.")
+        return
+
+    # Ouvrir les fichiers
+    with open(source_html, "r", encoding='utf-8') as f_html:
+        source_content = f_html.read()
+    
+    with open(output_pdf, "wb") as f_pdf:
+        # Lancer la conversion
+        pisa_status = pisa.CreatePDF(source_content, dest=f_pdf)
+
+    # Vérifier le résultat
+    if pisa_status.err:
+        print("❌ Erreur lors de la conversion PDF.")
+    else:
+        print(f"✅ Succès ! Fichier créé : {output_pdf}")
+
+if __name__ == "__main__":
+    # MODIFIEZ ICI LE NOM DE VOTRE FICHIER HTML
+    mon_fichier_html = "documentation.html"  # <--- Mettez le vrai nom ici
+    mon_fichier_pdf = "Documentation_Technique_PLR.pdf"
+    
+    convert_html_to_pdf(mon_fichier_html, mon_fichier_pdf)

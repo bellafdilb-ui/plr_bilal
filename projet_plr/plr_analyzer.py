@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from typing import Dict, Optional, Any
-from scipy.signal import medfilt
+from scipy.signal import medfilt, savgol_filter
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ class PLRAnalyzer:
         if self.data is None: return
 
         # 1. Mode BRUT (Raw)
-        # On abaisse le seuil à 0.1mm car 1.5mm masquait probablement tes données de test
+        # Nettoyage des valeurs aberrantes
         mask_invalid = (self.data['diameter_mm'] < 0.1) | (self.data['diameter_mm'] > 50.0)
         
         self.data['diameter_smooth'] = self.data['diameter_mm'].copy()
@@ -81,10 +81,16 @@ class PLRAnalyzer:
 
         # 3. Filtrage Léger (Micro-Médian)
         # On supprime uniquement les pics aberrants isolés (ex: cils) sur 3 frames.
-        # Le filtre Savitzky-Golay a été retiré pour préserver la dynamique réelle.
         try:
             self.data['diameter_smooth'] = medfilt(self.data['diameter_smooth'], kernel_size=3)
         except Exception: pass
+
+        # 4. Lissage Savitzky-Golay (Anti-Escalier & Anti-Bruit)
+        # Lisse la courbe tout en préservant les pics de constriction
+        try:
+            if len(self.data) > 15:
+                self.data['diameter_smooth'] = savgol_filter(self.data['diameter_smooth'], window_length=15, polyorder=3)
+        except Exception as e: logger.warning(f"Savgol filter error: {e}")
 
         # Vitesse
         self.data['velocity_mm_s'] = np.gradient(self.data['diameter_smooth'], self.data['timestamp_s'])
@@ -112,6 +118,15 @@ class PLRAnalyzer:
             
         try:
             df = self.data
+            
+            # --- SYNCHRONISATION BLACK FRAME ---
+            t0_synchro = self.detect_t0_from_black_frame()
+            if t0_synchro is not None:
+                flash_timestamp = t0_synchro
+                # Réalignement temporel optionnel (si on veut que le graph commence à 0 au flash)
+                # self.data['timestamp_s'] = self.data['timestamp_s'] - flash_timestamp
+                # flash_timestamp = 0.0 
+                logger.info(f"📍 SYNC: Black Frame détectée à T={t0_synchro:.3f}s. Recalage effectué.")
             
             # --- CALCUL DE BASELINE INTELLIGENT ---
             # Au lieu de faire la moyenne de tout le début (qui peut monter),
@@ -182,9 +197,9 @@ class PLRAnalyzer:
                     t75 = recov_pts['timestamp_s'].iloc[0] - min_time
 
             self.results = {
-                "baseline_mm": round(float(baseline_val), 2),
-                "min_diameter_mm": round(float(min_val), 2),
-                "amplitude_mm": round(float(amplitude), 2),
+                "baseline_mm": round(float(baseline_val), 1),
+                "min_diameter_mm": round(float(min_val), 1),
+                "amplitude_mm": round(float(amplitude), 1),
                 "latency_s": round(float(latency), 3),
                 "constriction_velocity_mm_s": round(float(max_vel), 2),
                 "constriction_duration_s": round(float(const_duration), 2),
@@ -197,6 +212,27 @@ class PLRAnalyzer:
         except Exception as e:
             logger.error(f"Erreur analyse : {e}")
             return {}
+
+    def detect_t0_from_black_frame(self) -> Optional[float]:
+        """Détecte le T0 précis grâce au marqueur 'Black Frame' (chute luminosité)."""
+        if self.data is None or 'brightness' not in self.data.columns: return None
+        
+        # Seuil ajustable (ici 10.0, assez bas pour ne pas confondre avec un clignement)
+        THRESHOLD_BLACK = 10.0
+        
+        # On cherche les frames où la luminosité chute
+        black_indices = self.data.index[self.data['brightness'] < THRESHOLD_BLACK].tolist()
+        if not black_indices: return None
+        
+        # Stratégie : Le T0 est la dernière frame noire avant le retour de la lumière (Flash)
+        # C'est souvent plus précis que la première frame noire
+        last_black_idx = black_indices[-1]
+        
+        if last_black_idx + 1 < len(self.data):
+            # On retourne le timestamp de la frame qui suit immédiatement le noir (Le Flash)
+            return self.data.iloc[last_black_idx + 1]['timestamp_s']
+            
+        return None
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

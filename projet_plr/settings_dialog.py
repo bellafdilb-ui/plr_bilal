@@ -9,7 +9,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QTabWidget, QWidget,
     QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QGroupBox, 
-    QLineEdit, QFileDialog, QListWidget, QMessageBox, QComboBox
+    QLineEdit, QFileDialog, QListWidget, QMessageBox, QComboBox, QCheckBox
 )
 from PySide6.QtCore import Qt, Signal
 from db_manager import DatabaseManager
@@ -25,7 +25,7 @@ class ConfigManager:
         if not self.config_path.exists():
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
             default_conf = {
-                "general": {"language": "fr"},
+                "general": {"language": "fr", "enable_beep": True},
                 "camera": {"index": 0, "width": 640, "height": 480}, 
                 "detection": {"canny_threshold1": 50, "gaussian_blur": 5, "roi_width":400, "roi_height":400},
                 "protocol": {"baseline_duration": 2.0, "flash_duration_ms": 200, "response_duration": 5.0, "flash_count": 1, "default_color": "WHITE"},
@@ -75,8 +75,9 @@ class SettingsDialog(QDialog):
     def _tab_general(self):
         w = QWidget(); l = QFormLayout(w)
         self.combo_lang = QComboBox(); self.combo_lang.addItem("Français", "fr"); self.combo_lang.addItem("English", "en")
+        self.chk_beep = QCheckBox(self.tr("Activer le bip de démarrage"))
         lbl_info = QLabel(self.tr("<i>Le changement de langue nécessite un redémarrage de l'application.</i>")); lbl_info.setStyleSheet("color: gray;")
-        l.addRow(self.tr("Langue :"), self.combo_lang); l.addRow("", lbl_info)
+        l.addRow(self.tr("Langue :"), self.combo_lang); l.addRow("", self.chk_beep); l.addRow("", lbl_info)
         return w
 
     def _tab_protocol(self):
@@ -86,7 +87,6 @@ class SettingsDialog(QDialog):
         self.spin_baseline = QDoubleSpinBox(); self.spin_baseline.setSuffix(" s"); self.spin_baseline.setRange(0.5, 30.0); self.spin_baseline.setSingleStep(0.5)
         self.spin_flash_s = QDoubleSpinBox(); self.spin_flash_s.setSuffix(" s"); self.spin_flash_s.setRange(0.01, 10.0); self.spin_flash_s.setSingleStep(0.1); self.spin_flash_s.setDecimals(2)
         self.spin_total_time = QDoubleSpinBox(); self.spin_total_time.setSuffix(" s"); self.spin_total_time.setRange(1.0, 120.0); self.spin_total_time.setSingleStep(1.0)
-        self.spin_count = QSpinBox(); self.spin_count.setRange(1, 10)
         
         # AJOUT COULEUR PAR DEFAUT
         self.combo_def_color = QComboBox()
@@ -94,11 +94,25 @@ class SettingsDialog(QDialog):
         self.combo_def_color.addItem(self.tr("Rouge (630nm)"), "RED")
         self.combo_def_color.addItem(self.tr("Achromatique (Blanc)"), "WHITE")
 
+        # AJOUT PARAMETRES DISPOSITIF (Intensité, Fréquence, Ambiance)
+        self.spin_flash_intensity = QSpinBox(); self.spin_flash_intensity.setRange(0, 65536); self.spin_flash_intensity.setSingleStep(100); self.spin_flash_intensity.setSuffix(" Cd")
+        self.spin_frequency = QDoubleSpinBox(); self.spin_frequency.setRange(0.01, 60.0); self.spin_frequency.setSingleStep(0.1); self.spin_frequency.setSuffix(" Hz")
+        self.spin_ambiance = QSpinBox(); self.spin_ambiance.setRange(0, 65536); self.spin_ambiance.setSingleStep(100); self.spin_ambiance.setSuffix(" u")
+
         fl.addRow(self.tr("1. Baseline:"), self.spin_baseline)
         fl.addRow(self.tr("2. Flash:"), self.spin_flash_s)
         fl.addRow(self.tr("3. Durée TOTALE:"), self.spin_total_time)
-        fl.addRow(self.tr("Nb Flashs:"), self.spin_count)
         fl.addRow(self.tr("Couleur par défaut:"), self.combo_def_color)
+        
+        fl.addRow(self.tr("--- Paramètres Dispositif ---"), QLabel(""))
+        fl.addRow(self.tr("Intensité Flash:"), self.spin_flash_intensity)
+        fl.addRow(self.tr("Fréquence:"), self.spin_frequency)
+        fl.addRow(self.tr("Ambiance:"), self.spin_ambiance)
+        
+        self.btn_test_hw = QPushButton(self.tr("🔌 Tester Connexion & Version"))
+        self.btn_test_hw.clicked.connect(self.test_hardware)
+        fl.addRow(self.btn_test_hw)
+        
         g.setLayout(fl); l.addWidget(g); return w
 
     def _tab_camera(self):
@@ -136,10 +150,12 @@ class SettingsDialog(QDialog):
 
     def load_settings(self):
         c = self.config_manager.config
-        lang = c.get("general", {}).get("language", "fr"); idx = 1 if lang == "en" else 0; self.combo_lang.setCurrentIndex(idx)
+        gen = c.get("general", {})
+        lang = gen.get("language", "fr"); idx = 1 if lang == "en" else 0; self.combo_lang.setCurrentIndex(idx)
+        self.chk_beep.setChecked(gen.get("enable_beep", True))
         p = c.get("protocol", {})
         base = p.get("baseline_duration", 2.0); flash_s = p.get("flash_duration_ms", 200) / 1000.0; resp = p.get("response_duration", 5.0)
-        self.spin_baseline.setValue(base); self.spin_flash_s.setValue(flash_s); self.spin_total_time.setValue(base + flash_s + resp); self.spin_count.setValue(p.get("flash_count", 1))
+        self.spin_baseline.setValue(base); self.spin_flash_s.setValue(flash_s); self.spin_total_time.setValue(base + flash_s + resp)
         
         # Charge la couleur par défaut
         def_col = p.get("default_color", "BLUE")
@@ -147,6 +163,11 @@ class SettingsDialog(QDialog):
         if def_col == "RED": idx_col = 1
         elif def_col == "WHITE": idx_col = 2
         self.combo_def_color.setCurrentIndex(idx_col)
+
+        # Charge les nouveaux paramètres (avec valeurs par défaut demandées)
+        self.spin_flash_intensity.setValue(p.get("flash_intensity", 2000))
+        self.spin_frequency.setValue(p.get("flash_frequency", 0.1))
+        self.spin_ambiance.setValue(p.get("ambiance_intensity", 0))
 
         cm = c.get("camera", {}); self.spin_idx.setValue(cm.get("index", 0))
         d = c.get("detection", {}); self.spin_canny.setValue(d.get("canny_threshold1", 50)); self.spin_blur.setValue(d.get("gaussian_blur", 5)); self.spin_rw.setValue(d.get("roi_width", 400)); self.spin_rh.setValue(d.get("roi_height", 400)); self.spin_offx.setValue(d.get("roi_offset_x", 0)); self.spin_offy.setValue(d.get("roi_offset_y", 0))
@@ -160,13 +181,16 @@ class SettingsDialog(QDialog):
         lang_code = self.combo_lang.currentData()
         
         return {
-            "general": {"language": lang_code},
+            "general": {"language": lang_code, "enable_beep": self.chk_beep.isChecked()},
             "protocol": {
                 "baseline_duration": base, 
                 "flash_duration_ms": int(flash_s * 1000), 
                 "response_duration": round(response, 2), 
-                "flash_count": self.spin_count.value(),
-                "default_color": self.combo_def_color.currentData() # SAUVEGARDE COULEUR
+                "flash_count": 1,
+                "default_color": self.combo_def_color.currentData(),
+                "flash_intensity": self.spin_flash_intensity.value(),
+                "flash_frequency": self.spin_frequency.value(),
+                "ambiance_intensity": self.spin_ambiance.value()
             },
             "camera": {"index": self.spin_idx.value(), "width": 640, "height": 480},
             "detection": {"canny_threshold1": self.spin_canny.value(), "gaussian_blur": self.spin_blur.value(), "roi_width": self.spin_rw.value(), "roi_height": self.spin_rh.value(), "roi_offset_x": self.spin_offx.value(), "roi_offset_y": self.spin_offy.value()},
@@ -178,3 +202,24 @@ class SettingsDialog(QDialog):
         self.db.set_clinic_info(self.inp_clin_name.text(), self.inp_clin_addr.text(), self.inp_clin_phone.text(), "", self.inp_clin_doc.text(), self.inp_clin_logo.text())
 
     def save_and_close(self): self.apply_settings(); self.config_manager.save(self.get_settings()); self.accept()
+
+    def test_hardware(self):
+        """Teste la connexion et demande la version."""
+        main_win = self.parent()
+        if not hasattr(main_win, 'hardware'): return
+
+        hw = main_win.hardware
+        if not hw.is_connected:
+            QMessageBox.warning(self, self.tr("Erreur"), self.tr("Le matériel n'est pas connecté."))
+            return
+
+        # Connexion temporaire du signal
+        try: hw.firmware_received.disconnect(self._on_firmware_received)
+        except: pass
+        hw.firmware_received.connect(self._on_firmware_received)
+        hw.request_firmware_version()
+
+    def _on_firmware_received(self, version):
+        QMessageBox.information(self, self.tr("Succès"), self.tr("Matériel connecté.\nRéponse : {}").format(version))
+        try: self.parent().hardware.firmware_received.disconnect(self._on_firmware_received)
+        except: pass

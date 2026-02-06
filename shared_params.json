@@ -1,23 +1,23 @@
 {
-  "timestamp": "2025-11-25T15:23:15.168679",
-  "params": {
-    "exposure": -6.453237410071942,
-    "brightness": 137,
-    "contrast": 30,
-    "blur_kernel": 9,
-    "threshold_value": 44,
-    "morph_kernel": 3,
-    "morph_iterations": 1,
-    "min_area": 250,
-    "max_area": 5000,
-    "min_circularity": 0.6071146245059289,
-    "roi_x": 200,
-    "roi_y": 150,
-    "roi_width": 240,
-    "roi_height": 180,
-    "view_mode": 3,
-    "recording": false,
-    "shutdown": false,
-    "ratio_mm_per_px": 1
-  }
+    "params": {
+        "exposure": -5.0,
+        "brightness": 137,
+        "contrast": 30,
+        "blur_kernel": 9,
+        "threshold_value": 34,
+        "morph_kernel": 3,
+        "morph_iterations": 1,
+        "min_area": 250,
+        "max_area": 5000,
+        "min_circularity": 0.6,
+        "roi_x": 200,
+        "roi_y": 150,
+        "roi_width": 240,
+        "roi_height": 180,
+        "view_mode": 1,
+        "recording": false,
+        "shutdown": false,
+        "ratio_mm_per_px": 1
+    },
+    "last_update": "2025-11-26T10:57:05.437595"
 }

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Guide Utilisateur - PLR Vet</title>
+<style>
+  body { 
+    font-family: 'Segoe UI', Arial, Helvetica, sans-serif; 
+    line-height: 1.6; 
+    color: #333; 
+    max-width: 800px; 
+    margin: 0 auto; 
+    padding: 40px; 
+    background: #fff;
+  }
+  h1 { 
+    text-align: center; 
+    color: #2c3e50; 
+    border-bottom: 3px solid #3498db; 
+    padding-bottom: 20px; 
+    margin-bottom: 30px;
+  }
+  h2 { 
+    color: #2980b9; 
+    margin-top: 40px; 
+    border-bottom: 1px solid #eee; 
+    padding-bottom: 10px; 
+  }
+  h3 { 
+    color: #16a085; 
+    margin-top: 25px; 
+    font-weight: 600;
+  }
+  .toc { 
+    background: #f8f9fa; 
+    padding: 25px; 
+    border-left: 5px solid #3498db; 
+    margin-bottom: 40px; 
+  }
+  .toc h2 { margin-top: 0; font-size: 1.4em; border: none; }
+  .toc ul { padding-left: 20px; }
+  .toc li { margin-bottom: 8px; }
+  .toc a { text-decoration: none; color: #2980b9; font-weight: 500; }
+  .toc a:hover { text-decoration: underline; }
+  
+  .alert { 
+    background-color: #fff3cd; 
+    border: 1px solid #ffeeba; 
+    color: #856404; 
+    padding: 15px; 
+    border-radius: 4px; 
+    margin: 20px 0; 
+    border-left: 5px solid #ffc107;
+  }
+  .info { 
+    background-color: #d1ecf1; 
+    border: 1px solid #bee5eb; 
+    color: #0c5460; 
+    padding: 15px; 
+    border-radius: 4px; 
+    margin: 20px 0; 
+    border-left: 5px solid #17a2b8;
+  }
+  
+  .screenshot { 
+    border: 1px solid #e2e8f0; 
+    background: #fff; 
+    padding: 10px; 
+    text-align: center; 
+    margin: 25px 0; 
+    border-radius: 4px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+  }
+  .screenshot img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+    border: 1px solid #eee;
+  }
+  .caption {
+    font-style: italic;
+    color: #666;
+    font-size: 0.9em;
+    margin-top: 10px;
+    display: block;
+  }
+  
+  .btn-ref { 
+    background: #e2e8f0; 
+    border: 1px solid #cbd5e0; 
+    padding: 2px 8px; 
+    border-radius: 4px; 
+    font-weight: bold; 
+    font-size: 0.9em; 
+    color: #2d3748;
+    white-space: nowrap;
+  }
+  .btn-green { background: #d4edda; color: #155724; border-color: #c3e6cb; }
+  .btn-blue { background: #d1ecf1; color: #0c5460; border-color: #bee5eb; }
+  
+  table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 0.95em; }
+  th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+  th { background-color: #f8f9fa; color: #333; font-weight: 600; }
+  
+  .footer {
+    margin-top: 50px;
+    padding-top: 20px;
+    border-top: 1px solid #eee;
+    text-align: center;
+    font-size: 0.9em;
+    color: #888;
+  }
+</style>
+</head>
+<body>
+
+  <h1>🐾 Guide Utilisateur PLR Vet</h1>
+  <p style="text-align: center; font-size: 1.1em; color: #555;">
+    Manuel de référence pour la pupillométrie vétérinaire numérique
+  </p>
+
+  <div class="toc">
+    <h2>Table des matières</h2>
+    <ul>
+      <li><a href="#intro">1. Introduction</a></li>
+      <li><a href="#accueil">2. Gestion des Patients (Accueil)</a></li>
+      <li><a href="#interface">3. Interface d'Examen</a></li>
+      <li><a href="#exam">4. Réaliser un Examen (Pas à Pas)</a></li>
+      <li><a href="#settings">5. Configuration et Paramètres</a></li>
+      <li><a href="#faq">6. Dépannage</a></li>
+    </ul>
+  </div>
+
+  <h2 id="intro">1. Introduction</h2>
+  <p>Bienvenue dans <strong>PLR Vet</strong>. Ce logiciel permet l'analyse objective du réflexe photomoteur (PLR) chez l'animal via une caméra infrarouge dédiée.</p>
+
+  <h2 id="accueil">2. Gestion des Patients (Accueil)</h2>
+  <p>Au lancement, l'écran d'accueil s'affiche. Il est divisé en trois zones principales pour une gestion fluide de votre patientèle.</p>
+  
+  <div class="screenshot">
+    <img src="C:\Users\siemb\Downloads\Guide/accueil.png" alt="Écran d'accueil PLR Vet">
+    <span class="caption">Fig 1. Écran d'accueil : Liste des patients (gauche) et fiche détaillée (droite).</span>
+  </div>
+
+  <h3>2.1 Base de Données (Gauche)</h3>
+  <p>Cette liste contient tous vos patients enregistrés. Vous pouvez filtrer la liste en tapant un nom ou un numéro de puce dans la barre <strong>Rechercher...</strong>.</p>
+  <ul>
+    <li>Colonnes disponibles : <strong>Nom</strong>, <strong>Espèce</strong>, <strong>ID / Puce</strong>.</li>
+  </ul>
+
+  <h3>2.2 Création et Édition (Droite)</h3>
+  <p>Pour ajouter un animal, cliquez sur le bouton bleu en bas à gauche : <span class="btn-ref btn-blue">+ CRÉER NOUVEAU PATIENT</span>.</p>
+  <p>Remplissez ensuite la <strong>Fiche Patient</strong> à droite :</p>
+  <ul>
+    <li><strong>Champs obligatoires (*) :</strong> Nom, ID (Puce/Tatouage).</li>
+    <li><strong>Détails :</strong> Espèce (Chien, Chat, NAC), Race, Sexe, Date de naissance.</li>
+    <li><strong>Notes :</strong> Zone de texte libre pour vos remarques cliniques.</li>
+  </ul>
+  <p>Cliquez sur <span class="btn-ref">💾 Enregistrer</span> pour valider.</p>
+
+  <h3>2.3 Accès à l'Examen</h3>
+  <p>Une fois le patient sélectionné ou créé, son historique s'affiche dans le panneau "Historique du Patient". Pour lancer une nouvelle session, cliquez sur le grand bouton vert : <span class="btn-ref btn-green">OUVRIR DOSSIER D'EXAMEN</span>.</p>
+
+  <h2 id="interface">3. Interface d'Examen</h2>
+  <div class="screenshot">
+    <img src="C:\Users\siemb\Downloads\Guide/examen_vide.png" alt="Interface d'examen">
+    <span class="caption">Fig 2. Interface d'examen en temps réel avec retour vidéo et contrôles.</span>
+  </div>
+
+  <p>Cette fenêtre est votre outil de travail principal. Elle permet de contrôler la caméra, stimuler l'œil et visualiser les résultats.</p>
+
+  <h3>Panneau de Contrôle (Gauche)</h3>
+  <table border="1">
+    <tr>
+      <th width="30%">Section</th>
+      <th>Fonctionnalités</th>
+    </tr>
+    <tr>
+      <td><strong>Retour Vidéo</strong></td>
+      <td>Vue infrarouge. Un rectangle bleu délimite la zone d'intérêt (ROI). Le réticule rouge indique le centre de la pupille détectée.</td>
+    </tr>
+    <tr>
+      <td><strong>État</strong></td>
+      <td>Indicateurs <span class="btn-ref btn-green">✅ CAM</span> et <span class="btn-ref btn-green">Appareil: Connecté</span>.</td>
+    </tr>
+    <tr>
+      <td><strong>Choix de l'Œil</strong></td>
+      <td>Sélectionnez <span class="btn-ref" style="color:red">OD (Droit)</span> ou <span class="btn-ref" style="color:blue">OG (Gauche)</span> pour l'archivage.</td>
+    </tr>
+    <tr>
+      <td><strong>Stimulus</strong></td>
+      <td>Choix de la couleur du flash : <strong>Bleu</strong> (standard), <strong>Rouge</strong> (tests spécifiques), ou <strong>Blanc</strong>.</td>
+    </tr>
+    <tr>
+      <td><strong>Réglages</strong></td>
+      <td>
+        <strong>Seuil :</strong> Ajuste la sensibilité de détection du noir (pupille).<br>
+        <strong>Flou :</strong> Lisse l'image pour réduire le bruit.
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Actions</strong></td>
+      <td>
+        <span class="btn-ref btn-green">▶ LANCER EXAMEN</span> : Démarre la séquence.<br>
+        <span class="btn-ref" style="background:#f0ad4e; color:white">🔄 Réinit. Caméra</span> : Relance le flux vidéo en cas de figeage.
+      </td>
+    </tr>
+  </table>
+
+  <h3>Zone d'Analyse (Droite)</h3>
+  <ul>
+    <li><strong>Graphique :</strong> Affiche la courbe de diamètre pupillaire (mm) en fonction du temps (s).</li>
+    <li><strong>Rapport / Commentaires :</strong> Menu déroulant pour insérer des phrases types (Macros) et zone de texte pour les observations.</li>
+    <li><strong>Historique (Bas) :</strong> Tableau récapitulatif des examens de la session (Heure, Oeil, Couleur Stim, Type).</li>
+  </ul>
+
+  <h2 id="exam">4. Réaliser un Examen (Pas à Pas)</h2>
+
+  <h3>Étape 1 : Préparation</h3>
+  <p>Positionnez la caméra devant l'œil de l'animal. Ajustez la distance jusqu'à ce que l'image soit nette. Le logiciel doit détecter la pupille (cercle de suivi).</p>
+
+  <h3>Étape 2 : Lancement</h3>
+  <ol>
+    <li>Vérifiez que l'œil sélectionné (OD/OG) est correct.</li>
+    <li>Choisissez la couleur du stimulus (par défaut <strong>Bleu</strong>).</li>
+    <li>Cliquez sur <span class="btn-ref btn-green">▶ LANCER EXAMEN</span>.</li>
+  </ol>
+
+  <h3>Étape 3 : Séquence Automatique</h3>
+  <p>Le protocole standard (configurable) s'exécute :</p>
+  <ul>
+    <li><strong>0s - 1s :</strong> Baseline (Mesure au repos).</li>
+    <li><strong>1s - 2s :</strong> FLASH (Stimulation lumineuse). Une bande jaune apparaît sur le graphique.</li>
+    <li><strong>2s - 8s :</strong> Réponse (Suivi de la constriction et redilatation).</li>
+  </ul>
+
+  <div class="screenshot">
+    <img src="C:\Users\siemb\Downloads\Guide/examen_courbe.png" alt="Résultat graphique avec flash">
+    <span class="caption">Fig 3. Analyse post-examen : La zone jaune indique le flash, la courbe bleue la réponse pupillaire.</span>
+  </div>
+  <p>La courbe bleue montre la dynamique pupillaire. Vous pouvez survoler la courbe pour voir les valeurs précises (Temps / Diamètre).</p>
+
+  <h2 id="settings">5. Configuration et Paramètres</h2>
+  <p>Accessible via le menu <strong>Options > Paramètres</strong>, cette fenêtre permet de personnaliser le logiciel.</p>
+
+  <h3>5.1 Onglet Protocole</h3>
+  <div class="screenshot">
+    <img src="C:\Users\siemb\Downloads\Guide/params_protocole.png" alt="Paramètres du protocole">
+    <span class="caption">Fig 4. Configuration des durées et du type de flash.</span>
+  </div>
+  <p>Définit la chronologie de l'examen. Les valeurs par défaut sont :</p>
+  <ul>
+    <li><strong>Baseline :</strong> 1,00 s</li>
+    <li><strong>Flash :</strong> 1,00 s (Durée de la stimulation)</li>
+    <li><strong>Durée TOTALE :</strong> 8,00 s</li>
+    <li><strong>Couleur par défaut :</strong> Bleu (480nm)</li>
+  </ul>
+
+  <h3>5.2 Onglet Détection</h3>
+  <p>Permet de calibrer l'algorithme de vision :</p>
+  <ul>
+    <li><strong>Seuil (Threshold) :</strong> Valeur de gris (0-255) pour isoler la pupille. Par défaut à <strong>147</strong>.</li>
+    <li><strong>ROI (Region of Interest) :</strong> Taille de la zone d'analyse (400x200 par défaut) pour accélérer le traitement.</li>
+  </ul>
+
+  <h3>5.3 Onglet Macros</h3>
+  <p>Gérez ici vos phrases types pour les rapports. Tapez votre texte, cliquez sur <strong>Ajouter</strong>. Elles seront ensuite disponibles dans la liste déroulante de la fenêtre d'examen.</p>
+
+  <h3>5.4 Onglet Clinique</h3>
+  <p>Renseignez les coordonnées de votre clinique (Nom, Adresse, Praticien) et importez votre <strong>Logo</strong>. Ces informations apparaîtront sur les rapports PDF exportés.</p>
+
+  <h2 id="faq">6. Dépannage</h2>
+  <p><strong>L'image est trop sombre ou trop claire.</strong><br>
+  Ajustez le curseur <strong>Seuil</strong> dans la fenêtre d'examen. Si le seuil est trop bas, tout est noir. S'il est trop haut, le logiciel détecte des ombres comme étant la pupille.</p>
+
+  <p><strong>Le graphique reste plat.</strong><br>
+  Vérifiez que la case <strong>"Voir Bruit (Brut)"</strong> est décochée pour voir les données filtrées. Assurez-vous que le cercle vert suivait bien la pupille pendant le flash.</p>
+
+  <div class="footer">
+    © 2025 PLR Vet Solutions - Documentation v2.2<br>
+    Basé sur la version logicielle du 11/12/2025
+  </div>
+
+</body>
+</html>

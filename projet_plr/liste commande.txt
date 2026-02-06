@@ -1,0 +1,135 @@
+####################    EXEMPLE DE COMMANDE #######################
+
+Type : commande, Commande : arret(RESET hard du PICO=reconnection)  allume(allume la led du pico) eteint(eteint la led du pico) mode0(mode du SPI) mode1 mode2 mode3 init_ads1299 reset_ads1299 allume_ambiance
+                            arret_ambiance lire_intensite_ambiance ecrire_intensite_ambiance_droit(+valeur 0-65536) ecrire_intensite_ambiance_gauche(+valeur 0-65536)
+			    ecrire_frequence_flash(+valeur 0.01-max) ecrire_couleur_ambiance(+valeur blanc,bleu,rouge,orange ou vert)
+			    ecrire_couleur_flash(+valeur blanc,bleu,rouge,orange ou vert) ecrire_intensite_flash_droit(+valeur 0-65536)
+			    ecrire_intensite_flash_gauche(+valeur 0-65536) ecrire_cote_flash(+valeur droit gauche ou droit_gauche)
+			    ecrire_retard_flash(+valeur 0-max) ecrire_retard_flash_offset(+valeur ms) lire_intensite_flash lire_couleur_ambiance lire_couleur_flash lire_retard_flash lire_retard_flash_offset lire_cote_flash
+			    lire_frequence_flash ecrire_nombre_acquisition(>=1)  lire_nombre_acquisition arret_flash depart_flash ecrire_duree_flash_us 
+			    lire_duree_flash_us version	depart_flash_gachette lire_etat_bouton
+			    voie1 voie2 voie3 voie4 voie1&voie2 voie1&voie3 voie1&voie4 voie2&voie3 voie2&voie4 voie3&voie4 lire_voie
+                            ecrire_fichier_txt (pour acquisition courbe model plus le non du fichier texte ou "annuller" pour annuller le test)
+			    16bits (acquisition sur 16 bits) 24bits (acquisition sur 24 bits)
+     
+			    WAKEUP STANDBY RESET START STOP RDATAC SDATAC RDATA	
+
+Les commandes directes : depart = connection du module aprés mise sous tension (renvoi le numéro de version si connection établie exp : version : 231009V5)
+			 arret_flash = arret du flash lors de la stimulation
+			 pause_flash = mettre en pause la stimulation flash
+			 continuer_flash = reprendre la stimulation flash après une pause
+ 	
+tableau des registre =ID
+                      CONFIG1,CONFIG2,CONFIG3,CONFIG4
+                      LOFF
+                      CH1SET ,CH2SET,CH3SET,CH4SET,CH5SET,CH6SET,CH7SET,CH8SET
+                      BIAS_SENSP , BIAS_SENSN
+                      LOFF_SENSP , LOFF_SENSN
+                      LOFF_FLIP
+                      LOFF_STATP, LOFF_STATN
+                      MISC1, MISC2
+                      WCT1, WCT2
+                      GPIO
+
+Type: ecrire_chx, Chx:CH1SET, Mux:Normal_Electrode_Input , SRB2:SRB2_Open,Gain:GAIN1, Power_Down:Power_On
+		 Mux=('Normal_Electrode_Input'
+                    'Shorted_Input'
+                    'Bias_Mesure'
+                    'MVDD'
+                    'Temperature_Sensor'
+                    'Test_Signal'
+                    'BIAS_DRP'
+                    'BIAS_DRN')
+
+                  Gain=('GAIN1'
+                    	'GAIN2'
+                    	'GAIN4'
+                    	'GAIN6'
+                    	'GAIN8'
+                    	'GAIN12'
+                    	'GAIN24')
+
+                  SRB2 =('SRB2_Open' ou 'SRB2_Close')
+              
+
+                  Power_Down =('Power_On' ou 'Power_Off')
+
+Type : ecrire_registre, registre:GPIO, valeur:128
+
+Type : lire_registre , registre:GPIO
+
+Type : frequence_echantillonage, Valeur: Ksps_16k Ksps_8k Ksps_4k Ksps_2k Ksps_1k Ksps_500 Ksps_250
+
+Type : commande, Commande :depart_flash
+
+Type : commande, Commande :depart_flash_gachette
+
+Type : commande, Commande : ecrire_nombre_acquisition , valeur: 10
+
+Type : commande, Commande :lire_etat_bouton
+
+Type : commande, Commande :voie1&voie2
+
+Type : commande, Commande :lire_voie
+
+Type : commande, Commande :ecrire_frequence_flash , valeur: 10
+
+Type : commande, Commande :ecrire_couleur_flash , valeur: rouge
+
+Type : commande, Commande :ecrire_couleur_ambiance , valeur: rouge
+
+Type : commande, Commande :ecrire_duree_flash_us , valeur: 20000
+
+Type : commande, Commande :ecrire_retard_flash , valeur: 20
+
+Type : commande, Commande :ecrire_retard_flash_offset , valeur: 20
+
+Type : commande, Commande :ecrire_intensite_ambiance_droit , valeur: 4000
+
+Type : commande, Commande :ecrire_intensite_flash_droit , valeur: 2000
+
+Type : commande, Commande :ecrire_fichier_txt , valeur: courbes_erg_1000points.txt  ==> fichier contenant 1000 points courbe ERG
+
+Type : commande, Commande :ecrire_fichier_txt , valeur: annuller    ==> permet d'annuller l'acquisition sur model courbe ERG
+
+Type : commande, Commande :allume_ambiance
+
+Type : commande, Commande :arret_ambiance
+
+Pour info Format du tableau transmis : "dd,11,1111,0,192,5,4,16776186,16776188......16776185,16776180,192,0,4,ff"
+
+##########################  AJOUT NOUVELLE PROCEDURE DE COMMANDE 29/07/2024 ############################
+Toutes les valeurs envoyées sous forme d'une seule liste au µP ont un format suivant:
+----------------------------------------------------------------------------------------
+liste=["valeurs_pour_µP", combo_entrée, combo_voie, combo_gain, combo_couleur_flash, combo_couleur_ambiance, 
+          combo_durée_flash, combo_intensite_ambiance, combo_intensite_flash, combo_retard_flash, combo_somme_rejetée,
+          combo_somme_effectuée, combo_frequence_flash] (soit 13 valeurs)
+Où : 	- "valeurs_pour_µP" = mot clé de la liste                            (position 0)
+	- combo_entrée = "ERG", "PEV", "TEST" ou "Bruit de Fond"             (position 1)
+			 "Temperature","Bias_mesure","MVDD","BIAS_DRP"
+			 "BIAS_DRN"
+	- combo_voie = "Droit et Gauche", "Droit", "Gauche" ou "Aucun"       (position 2)
+	- combo_gain = "1", "2", "4" , "6", "8", "12" ou "24"                (position 3)
+	- combo_couleur_flash = "Achromat." , "Bleu" , "Rouge", ou "Vert"    (position 4) 
+	- combo_couleur_ambiance = "Achromat." , "Bleu" , "Rouge", ou "Vert" (position 5) 
+	- combo_durée_flash = "0.02" à "300" 	(exprimé en ms) 	     (position 6)
+	- combo_intensite_ambiance = "OFF" à "1000" (exprimé en Cd/m²) 	     (position 7)
+	- combo_intensite_flash = "OFF" à "1000" (exprimé en Cd.s/m²) 	     (position 8)
+	- combo_retard_flash = "0" à "300" (exprimé en ms)	 	     (position 9)
+	- combo_somme_rejetée = "0" à "150" 				     (position 10)
+	- combo_somme_effectuée ="1" à "1000" 				     (position 11)
+	- combo_frequence_flash ="0.01" à "60" (exprimé en Hz)		     (position 12)
+
+exemple : liste== ['valeurs_pour_µP', 'ERG', 'DROIT et GAUCHE', '1', 'Bleu', 'Achromat.', '5', '30', '3', '20', '1', '10', '30', '\n']
+		= valeurs_pour_µP, ERG, Droit et Gauche, 1, Bleu, vert, 5, OFF, 30000, 20, 1, 10, 4, \n
+	position:         0         1          2         3    4     5   6   7     8     9  10  11 12  
+Le retour de confirmation de reception se fait par l'envoi (µP->PC) d'un "Ok" ou "None" si y a erreur de valeur
+-------------------------------------------------------------------------------------------------------
+Une valeur specifique envoyée sous forme d'une seule liste au µP à un format suivant:
+liste=["une_valeur_pour_µP",'nom_combo','valeur_combo']
+Où : "une_valeur_pour_µP" mot-clé de la liste
+ et par exemple : -  'nom_combo' = "combo_entrée" et 'valeur_combo' = valeur ("ERG","PEV","TEST" ou "Bruit de Fond")
+		  -  'nom_combo' = "combo_durée_flash" et 'valeur_combo' = valeur ("0.02" à "300")
+		  - ...
+
+Le retour de confirmation de reception se fait par l'envoi (µP->PC) d'un "Ok" ou "None" si y a erreur de valeur

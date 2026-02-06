@@ -7,6 +7,7 @@ Moteur de capture ROBUSTE V4.1 (Fix: Crash Attribute Error 'csv_file').
 import cv2
 import numpy as np
 import time
+import os
 import logging
 from typing import Optional, Tuple, Dict, Any
 from settings_dialog import ConfigManager
@@ -42,8 +43,11 @@ class CameraEngine:
         
         # --- INITIALISATION CRITIQUE (C'est ce qui manquait) ---
         self.csv_file = None
+        self.frames_dir = None
+        self.frame_count = 0
         self.recording = False
         self.start_time = 0.0
+        self.last_valid_diameter = 0.0 # Pour la continuité lors de la Black Frame
         # -------------------------------------------------------
         
         self.open_camera()
@@ -95,7 +99,7 @@ class CameraEngine:
 
     def release(self):
         """Libère les ressources (caméra et fichier CSV)."""
-        self.stop_csv_recording()
+        self.stop_recording()
         if self.cap:
             self.cap.release()
 
@@ -115,20 +119,27 @@ class CameraEngine:
         """Change le mode d'affichage ('normal', 'roi', 'binary', 'mosaic')."""
         self.display_mode = mode
 
-    def start_csv_recording(self, filepath: str): 
-        """Démarre l'enregistrement des données pupillométriques dans un CSV."""
+    def start_recording(self, base_path: str): 
+        """Démarre l'enregistrement CSV et SÉQUENCE D'IMAGES."""
         try:
-            self.stop_csv_recording()
-            self.csv_file = open(filepath, 'w')
-            self.csv_file.write("timestamp_s,diameter_mm,quality_score\n")
-            self.csv_file.flush()
+            self.stop_recording()
+            
+            # 1. CSV
+            self.csv_file = open(base_path + ".csv", 'w')
+            self.csv_file.write("timestamp_s,diameter_mm,quality_score,brightness\n")
+            
+            # 2. SÉQUENCE D'IMAGES (Dossier de frames)
+            self.frames_dir = base_path + "_frames"
+            os.makedirs(self.frames_dir, exist_ok=True)
+            self.frame_count = 0
+            
             self.start_time = time.time()
             self.recording = True
         except Exception as e:
             print(f"[REC] Erreur : {e}")
             self.recording = False
 
-    def stop_csv_recording(self):
+    def stop_recording(self):
         """Arrête l'enregistrement CSV et ferme le fichier."""
         self.recording = False
         time.sleep(0.02)
@@ -140,6 +151,8 @@ class CameraEngine:
                     self.csv_file.close()
             except: pass
             self.csv_file = None
+            
+        self.frames_dir = None
 
     def get_roi_rect(self, w: int, h: int) -> Tuple[int, int, int, int]:
         """
@@ -189,6 +202,10 @@ class CameraEngine:
                 vis_frame = raw_frame.copy()
                 gray_frame = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2GRAY)
 
+            # --- DETECTION BLACK FRAME (SYNCHRO) ---
+            avg_brightness = np.mean(gray_frame)
+            is_black_frame = avg_brightness < 10.0 # Seuil de détection du "trou noir"
+
             # 2. ROI CROP
             h, w = vis_frame.shape[:2]
             x1, y1, x2, y2 = self.get_roi_rect(w, h)
@@ -201,54 +218,78 @@ class CameraEngine:
                 roi_gray = gray_frame[y1:y2, x1:x2]
                 roi_vis = vis_frame[y1:y2, x1:x2]
 
-            # 3. DÉTECTION
-            blurred = cv2.GaussianBlur(roi_gray, (self.blur_val, self.blur_val), 0)
-            _, binary = cv2.threshold(blurred, self.threshold_val, 255, cv2.THRESH_BINARY_INV)
-            
-            contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
             pupil_data = None
-            max_area = 0
-            best_cnt = None
-            
-            for cnt in contours:
-                area = cv2.contourArea(cnt)
-                if area < 50: continue
-                perim = cv2.arcLength(cnt, True)
-                if perim == 0: continue
-                circ = 4 * np.pi * (area / (perim**2))
-                if circ > 0.5 and area > max_area:
-                    max_area = area
-                    best_cnt = cnt
-            
-            # 4. RÉSULTATS & DESSIN
-            if best_cnt is not None:
-                (cx, cy), radius = cv2.minEnclosingCircle(best_cnt)
-                center = (int(cx), int(cy))
-                diameter_mm = (radius * 2) * self.mm_per_pixel
-                
+
+            if is_black_frame:
+                # ROBUSTESSE : Si frame noire, on ne détecte pas, on garde la dernière valeur
                 pupil_data = {
                     'timestamp': time.time(),
-                    'diameter_px': radius * 2,
-                    'diameter_mm': diameter_mm,
-                    'quality_score': 100
+                    'diameter_px': 0,
+                    'diameter_mm': np.nan, # Marqueur pour interpolation ultérieure
+                    'quality_score': 0,
+                    'brightness': avg_brightness
                 }
+                # Pas de dessin sur frame noire
+            else:
+                # 3. DÉTECTION NORMALE
+                blurred = cv2.GaussianBlur(roi_gray, (self.blur_val, self.blur_val), 0)
+                _, binary = cv2.threshold(blurred, self.threshold_val, 255, cv2.THRESH_BINARY_INV)
                 
-                # Écriture sécurisée
-                if self.recording and hasattr(self, 'csv_file') and self.csv_file and not self.csv_file.closed:
+                contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                
+                max_area = 0
+                best_cnt = None
+                
+                for cnt in contours:
+                    area = cv2.contourArea(cnt)
+                    if area < 50: continue
+                    perim = cv2.arcLength(cnt, True)
+                    if perim == 0: continue
+                    circ = 4 * np.pi * (area / (perim**2))
+                    if circ > 0.5 and area > max_area:
+                        max_area = area
+                        best_cnt = cnt
+                
+                # 4. RÉSULTATS & DESSIN
+                if best_cnt is not None:
+                    (cx, cy), radius = cv2.minEnclosingCircle(best_cnt)
+                    center = (int(cx), int(cy))
+                    # On garde la précision (3 décimales) pour éviter l'effet "escalier"
+                    diameter_mm = round((radius * 2) * self.mm_per_pixel, 3)
+                    self.last_valid_diameter = diameter_mm # Mise à jour valeur valide
+                    
+                    pupil_data = {
+                        'timestamp': time.time(),
+                        'diameter_px': radius * 2,
+                        'diameter_mm': diameter_mm,
+                        'quality_score': 100,
+                        'brightness': avg_brightness
+                    }
+                    
+                    cv2.circle(roi_vis, center, int(radius), (0, 255, 0), 2)
+                    cv2.circle(roi_vis, center, 2, (0, 0, 255), 3)
+                    
+                    # OSD (Texte Diamètre)
+                    text = f"{diameter_mm:.1f} mm"
+                    txt_pos = (center[0] - 40, center[1] - int(radius) - 10)
+                    cv2.putText(roi_vis, text, txt_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 4)
+                    cv2.putText(roi_vis, text, txt_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+            # ENREGISTREMENT
+            if self.recording:
+                # CSV
+                if pupil_data and hasattr(self, 'csv_file') and self.csv_file and not self.csv_file.closed:
                     try:
                         t_rel = time.time() - self.start_time
-                        self.csv_file.write(f"{t_rel:.3f},{diameter_mm:.3f},100\n")
+                        self.csv_file.write(f"{t_rel:.3f},{pupil_data['diameter_mm']:.3f},{pupil_data['quality_score']},{avg_brightness:.1f}\n")
                     except: pass
-                
-                cv2.circle(roi_vis, center, int(radius), (0, 255, 0), 2)
-                cv2.circle(roi_vis, center, 2, (0, 0, 255), 3)
-                
-                # OSD (Texte Diamètre)
-                text = f"{diameter_mm:.2f} mm"
-                txt_pos = (center[0] - 40, center[1] - int(radius) - 10)
-                cv2.putText(roi_vis, text, txt_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 4)
-                cv2.putText(roi_vis, text, txt_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                # FRAMES (Images individuelles)
+                if hasattr(self, 'frames_dir') and self.frames_dir:
+                    try:
+                        fname = f"frame_{self.frame_count:05d}.jpg"
+                        cv2.imwrite(os.path.join(self.frames_dir, fname), vis_frame)
+                        self.frame_count += 1
+                    except: pass
 
             # 5. RECONSTRUCTION
             cv2.rectangle(vis_frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
