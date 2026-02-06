@@ -1,0 +1,14 @@
+MODULE 1 → camera_engine.py (refactoring complet)
+    ↓ Test + Validation
+MODULE 2 → main_application.py (interface PyQt6)
+    ↓ Test + Validation
+MODULE 3 → settings_dialog.py (menu options)
+    ↓ Test + Validation
+MODULE 4 → quick_controls.py (panneau rapide)
+    ↓ Test + Validation
+MODULE 5 → plr_test_engine.py (orchestration test)
+    ↓ Test + Validation
+MODULE 6 → plr_analyzer.py (analyse post)
+    ↓ Test + Validation
+MODULE 7 → plr_results_viewer.py (graphiques)
+    ↓ TESTS D'INTÉGRATION FINAUX

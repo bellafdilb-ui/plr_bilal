@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="fr" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TechVision | Solutions Logicielles & Web sur mesure</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+
+        .glass {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .gradient-text {
+            background: linear-gradient(90deg, #38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .service-card:hover {
+            transform: translateY(-10px);
+            transition: all 0.3s ease;
+            border-color: #38bdf8;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header / Navbar -->
+    <nav class="fixed w-full z-50 glass">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+            <div class="text-2xl font-bold tracking-tighter">
+                <span class="text-sky-400">TECH</span>VISION
+            </div>
+            <div class="hidden md:flex space-x-8 text-sm font-medium uppercase tracking-widest items-center">
+                <a href="#services" class="hover:text-sky-400 transition" data-i18n="nav_services">Services</a>
+                <a href="#about" class="hover:text-sky-400 transition" data-i18n="nav_about">Notre Approche</a>
+                <button id="langToggle" class="flex items-center gap-2 hover:text-sky-400 transition border border-slate-700 px-3 py-1 rounded-md">
+                    <i class="fas fa-globe"></i> <span id="langLabel">FR</span>
+                </button>
+                <a href="#contact" class="bg-sky-500 hover:bg-sky-600 px-5 py-2 rounded-full transition" data-i18n="nav_contact">Devis gratuit</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="relative pt-32 pb-20 lg:pt-48 lg:pb-32 overflow-hidden">
+        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-full h-full -z-10">
+            <div class="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-sky-900/20 rounded-full blur-[120px]"></div>
+            <div class="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-900/20 rounded-full blur-[120px]"></div>
+        </div>
+
+        <div class="max-w-7xl mx-auto px-6 text-center">
+            <h1 class="text-5xl lg:text-7xl font-bold mb-6 leading-tight">
+                <span data-i18n="hero_title_pre">Transformez vos idées en</span> <br> <span class="gradient-text" data-i18n="hero_title_highlight">Réalité Numérique</span>
+            </h1>
+            <p class="text-slate-400 text-lg lg:text-xl max-w-2xl mx-auto mb-10" data-i18n="hero_desc">
+                Nous concevons des logiciels métier et des sites web haute performance, 
+                entièrement personnalisés pour propulser votre croissance.
+            </p>
+            <div class="flex flex-col sm:flex-row justify-center gap-4">
+                <a href="#services" class="px-8 py-4 bg-sky-500 hover:bg-sky-600 rounded-lg font-semibold transition shadow-lg shadow-sky-500/20" data-i18n="hero_btn_services">
+                    Découvrir nos services
+                </a>
+                <a href="#contact" class="px-8 py-4 bg-slate-800 hover:bg-slate-700 rounded-lg font-semibold transition border border-slate-700" data-i18n="hero_btn_contact">
+                    Parler à un expert
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Services Section -->
+    <section id="services" class="py-20 bg-slate-900/50">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="text-center mb-16">
+                <h2 class="text-3xl lg:text-4xl font-bold mb-4" data-i18n="services_title">Nos Coeurs de Métier</h2>
+                <p class="text-slate-400" data-i18n="services_subtitle">Une expertise technique au service de vos ambitions.</p>
+            </div>
+
+            <div class="grid md:grid-cols-2 gap-8">
+                <!-- Service 1 -->
+                <div class="service-card p-10 rounded-2xl glass transition-all border border-slate-700">
+                    <div class="w-14 h-14 bg-sky-500/10 rounded-lg flex items-center justify-center mb-6">
+                        <i class="fas fa-code text-sky-400 text-2xl"></i>
+                    </div>
+                    <h3 class="text-2xl font-bold mb-4" data-i18n="service_1_title">Développement Logiciel</h3>
+                    <p class="text-slate-400 mb-6" data-i18n="service_1_desc">
+                        Solutions ERP, CRM, ou outils internes spécifiques. Nous créons des logiciels robustes et évolutifs qui s'adaptent à vos processus métier uniques.
+                    </p>
+                    <ul class="space-y-3 text-sm text-slate-300">
+                        <li data-i18n="service_1_li_1"><i class="fas fa-check text-sky-400 mr-2"></i> Architecture évolutive</li>
+                        <li data-i18n="service_1_li_2"><i class="fas fa-check text-sky-400 mr-2"></i> Sécurité maximale des données</li>
+                        <li data-i18n="service_1_li_3"><i class="fas fa-check text-sky-400 mr-2"></i> Intégration API tierces</li>
+                    </ul>
+                </div>
+
+                <!-- Service 2 -->
+                <div class="service-card p-10 rounded-2xl glass transition-all border border-slate-700">
+                    <div class="w-14 h-14 bg-indigo-500/10 rounded-lg flex items-center justify-center mb-6">
+                        <i class="fas fa-laptop-code text-indigo-400 text-2xl"></i>
+                    </div>
+                    <h3 class="text-2xl font-bold mb-4" data-i18n="service_2_title">Création de Sites Web</h3>
+                    <p class="text-slate-400 mb-6" data-i18n="service_2_desc">
+                        Du site vitrine élégant à la plateforme e-commerce complexe. Nous mettons l'accent sur l'expérience utilisateur (UX) et la performance SEO.
+                    </p>
+                    <ul class="space-y-3 text-sm text-slate-300">
+                        <li data-i18n="service_2_li_1"><i class="fas fa-check text-indigo-400 mr-2"></i> Design Mobile-First</li>
+                        <li data-i18n="service_2_li_2"><i class="fas fa-check text-indigo-400 mr-2"></i> Optimisation Vitesse (Core Web Vitals)</li>
+                        <li data-i18n="service_2_li_3"><i class="fas fa-check text-indigo-400 mr-2"></i> Interface d'administration intuitive</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Why Us Section (Personalization & Support) -->
+    <section id="about" class="py-20">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="flex flex-col lg:flex-row items-center gap-16">
+                <div class="lg:w-1/2">
+                    <h2 class="text-3xl lg:text-4xl font-bold mb-6"><span data-i18n="about_title_pre">Plus qu'un prestataire,</span> <br><span class="text-sky-400" data-i18n="about_title_highlight">votre partenaire tech.</span></h2>
+                    <p class="text-slate-400 mb-8 text-lg" data-i18n="about_desc">
+                        Nous ne nous contentons pas de livrer du code. Nous vous accompagnons de la phase d'idéation jusqu'à la mise en production et au-delà.
+                    </p>
+                    
+                    <div class="space-y-6">
+                        <div class="flex gap-4">
+                            <div class="flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-full bg-slate-800 border border-slate-700">
+                                <i class="fas fa-sliders-h text-sky-400"></i>
+                            </div>
+                            <div>
+                                <h4 class="text-xl font-semibold" data-i18n="about_feat_1_title">Personnalisation Totale</h4>
+                                <p class="text-slate-400" data-i18n="about_feat_1_desc">Chaque ligne de code est écrite pour répondre spécifiquement à vos besoins. Pas de templates génériques.</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-full bg-slate-800 border border-slate-700">
+                                <i class="fas fa-user-shield text-sky-400"></i>
+                            </div>
+                            <div>
+                                <h4 class="text-xl font-semibold" data-i18n="about_feat_2_title">Accompagnement & Conseil</h4>
+                                <p class="text-slate-400" data-i18n="about_feat_2_desc">Analyse de vos besoins, choix technologiques, formation de vos équipes et support technique réactif.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="lg:w-1/2 grid grid-cols-2 gap-4">
+                    <div class="bg-slate-800 p-8 rounded-2xl text-center">
+                        <div class="text-4xl font-bold text-sky-400 mb-2">100%</div>
+                        <div class="text-sm uppercase tracking-wider" data-i18n="stat_1">Sur Mesure</div>
+                    </div>
+                    <div class="bg-slate-800 p-8 rounded-2xl mt-8 text-center border border-sky-500/30">
+                        <div class="text-4xl font-bold text-sky-400 mb-2">24/7</div>
+                        <div class="text-sm uppercase tracking-wider" data-i18n="stat_2">Support Dédié</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Partners Section -->
+    <section id="partners" class="py-20 border-t border-slate-800">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="text-center mb-12">
+                <h2 class="text-3xl font-bold mb-4" data-i18n="partners_title">Nos Partenaires</h2>
+                <p class="text-slate-400" data-i18n="partners_subtitle">Ils nous font confiance pour leurs projets stratégiques.</p>
+            </div>
+
+            <div class="flex flex-wrap justify-center gap-8">
+                <!-- Partner Item 1 -->
+                <div class="flex flex-col items-center group">
+                    <div class="w-40 h-24 glass rounded-xl flex items-center justify-center p-4 transition-all duration-300 group-hover:border-sky-500/50 group-hover:shadow-[0_0_20px_rgba(56,189,248,0.15)]">
+                        <!-- Pour mettre votre logo, remplacez la ligne <i> ci-dessous par : <img src="chemin/vers/logo.png" alt="Nom" class="max-h-full max-w-full opacity-70 group-hover:opacity-100 transition"> -->
+                        <i class="fas fa-rocket text-3xl text-slate-500 group-hover:text-sky-400 transition-colors"></i>
+                    </div>
+                    <span class="mt-3 text-sm font-medium text-slate-500 group-hover:text-sky-400 transition-colors">StartUp Flow</span>
+                </div>
+
+                <!-- Partner Item 2 -->
+                <div class="flex flex-col items-center group">
+                    <div class="w-40 h-24 glass rounded-xl flex items-center justify-center p-4 transition-all duration-300 group-hover:border-indigo-500/50 group-hover:shadow-[0_0_20px_rgba(99,102,241,0.15)]">
+                        <i class="fas fa-shield-alt text-3xl text-slate-500 group-hover:text-indigo-400 transition-colors"></i>
+                    </div>
+                    <span class="mt-3 text-sm font-medium text-slate-500 group-hover:text-indigo-400 transition-colors">Secure Net</span>
+                </div>
+
+                <!-- Partner Item 3 -->
+                <div class="flex flex-col items-center group">
+                    <div class="w-40 h-24 glass rounded-xl flex items-center justify-center p-4 transition-all duration-300 group-hover:border-sky-500/50 group-hover:shadow-[0_0_20px_rgba(56,189,248,0.15)]">
+                        <i class="fas fa-globe text-3xl text-slate-500 group-hover:text-sky-400 transition-colors"></i>
+                    </div>
+                    <span class="mt-3 text-sm font-medium text-slate-500 group-hover:text-sky-400 transition-colors">Global Tech</span>
+                </div>
+
+                <!-- Partner Item 4 -->
+                <div class="flex flex-col items-center group">
+                    <div class="w-40 h-24 glass rounded-xl flex items-center justify-center p-4 transition-all duration-300 group-hover:border-indigo-500/50 group-hover:shadow-[0_0_20px_rgba(99,102,241,0.15)]">
+                        <i class="fas fa-database text-3xl text-slate-500 group-hover:text-indigo-400 transition-colors"></i>
+                    </div>
+                    <span class="mt-3 text-sm font-medium text-slate-500 group-hover:text-indigo-400 transition-colors">Data Corp</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Contact Form -->
+    <section id="contact" class="py-20 bg-slate-900/50">
+        <div class="max-w-3xl mx-auto px-6">
+            <div class="glass p-8 lg:p-12 rounded-3xl border border-slate-700">
+                <h2 class="text-3xl font-bold mb-2 text-center" data-i18n="contact_title">Démarrons votre projet</h2>
+                <p class="text-center text-slate-400 mb-10" data-i18n="contact_subtitle">Parlez-nous de vos défis technologiques.</p>
+                
+                <form id="contactForm" class="space-y-6">
+                    <div class="grid md:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-sm font-medium mb-2" data-i18n="form_label_name">Nom complet</label>
+                            <input type="text" required class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 focus:outline-none focus:border-sky-500 transition">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2" data-i18n="form_label_email">Email professionnel</label>
+                            <input type="email" required class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 focus:outline-none focus:border-sky-500 transition">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-2" data-i18n="form_label_type">Type de projet</label>
+                        <select class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 focus:outline-none focus:border-sky-500 transition">
+                            <option data-i18n="form_opt_1">Création de Logiciel</option>
+                            <option data-i18n="form_opt_2">Création de Site Web</option>
+                            <option data-i18n="form_opt_3">Accompagnement / Conseil</option>
+                            <option data-i18n="form_opt_4">Autre</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-2" data-i18n="form_label_msg">Message</label>
+                        <textarea rows="4" required class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 focus:outline-none focus:border-sky-500 transition" placeholder="Décrivez votre besoin..." data-i18n-placeholder="form_placeholder_msg"></textarea>
+                    </div>
+                    <button type="submit" class="w-full bg-sky-500 hover:bg-sky-600 py-4 rounded-lg font-bold text-lg transition shadow-lg shadow-sky-500/20" data-i18n="form_btn">
+                        Envoyer ma demande
+                    </button>
+                </form>
+                <div id="formFeedback" class="hidden mt-6 p-4 bg-green-500/20 border border-green-500 text-green-400 rounded-lg text-center" data-i18n="form_success">
+                    Merci ! Votre message a été envoyé avec succès. Nous vous recontacterons sous 24h.
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-12 border-t border-slate-800">
+        <div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-8">
+            <div class="text-xl font-bold tracking-tighter">
+                <span class="text-sky-400">TECH</span>VISION
+            </div>
+            <p class="text-slate-500 text-sm" data-i18n="footer_copy">
+                &copy; 2024 TechVision Solutions. Tous droits réservés.
+            </p>
+            <div class="flex space-x-6">
+                <a href="#" class="text-slate-400 hover:text-sky-400 transition"><i class="fab fa-linkedin text-xl"></i></a>
+                <a href="#" class="text-slate-400 hover:text-sky-400 transition"><i class="fab fa-github text-xl"></i></a>
+                <a href="#" class="text-slate-400 hover:text-sky-400 transition"><i class="fab fa-twitter text-xl"></i></a>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // --- Gestion de la langue (FR/EN) ---
+        const translations = {
+            fr: {
+                nav_services: "Services",
+                nav_about: "Notre Approche",
+                nav_contact: "Devis gratuit",
+                hero_title_pre: "Transformez vos idées en",
+                hero_title_highlight: "Réalité Numérique",
+                hero_desc: "Nous concevons des logiciels métier et des sites web haute performance, entièrement personnalisés pour propulser votre croissance.",
+                hero_btn_services: "Découvrir nos services",
+                hero_btn_contact: "Parler à un expert",
+                services_title: "Nos Coeurs de Métier",
+                services_subtitle: "Une expertise technique au service de vos ambitions.",
+                about_title_pre: "Plus qu'un prestataire,",
+                about_title_highlight: "votre partenaire tech.",
+                about_desc: "Nous ne nous contentons pas de livrer du code. Nous vous accompagnons de la phase d'idéation jusqu'à la mise en production et au-delà.",
+                partners_title: "Nos Partenaires",
+                partners_subtitle: "Ils nous font confiance pour leurs projets stratégiques.",
+                contact_title: "Démarrons votre projet",
+                contact_subtitle: "Parlez-nous de vos défis technologiques.",
+                // Nouveaux ajouts
+                service_1_title: "Développement Logiciel",
+                service_1_desc: "Solutions ERP, CRM, ou outils internes spécifiques. Nous créons des logiciels robustes et évolutifs qui s'adaptent à vos processus métier uniques.",
+                service_1_li_1: "Architecture évolutive",
+                service_1_li_2: "Sécurité maximale des données",
+                service_1_li_3: "Intégration API tierces",
+                service_2_title: "Création de Sites Web",
+                service_2_desc: "Du site vitrine élégant à la plateforme e-commerce complexe. Nous mettons l'accent sur l'expérience utilisateur (UX) et la performance SEO.",
+                service_2_li_1: "Design Mobile-First",
+                service_2_li_2: "Optimisation Vitesse (Core Web Vitals)",
+                service_2_li_3: "Interface d'administration intuitive",
+                about_feat_1_title: "Personnalisation Totale",
+                about_feat_1_desc: "Chaque ligne de code est écrite pour répondre spécifiquement à vos besoins. Pas de templates génériques.",
+                about_feat_2_title: "Accompagnement & Conseil",
+                about_feat_2_desc: "Analyse de vos besoins, choix technologiques, formation de vos équipes et support technique réactif.",
+                stat_1: "Sur Mesure",
+                stat_2: "Support Dédié",
+                form_label_name: "Nom complet",
+                form_label_email: "Email professionnel",
+                form_label_type: "Type de projet",
+                form_label_msg: "Message",
+                form_opt_1: "Création de Logiciel",
+                form_opt_2: "Création de Site Web",
+                form_opt_3: "Accompagnement / Conseil",
+                form_opt_4: "Autre",
+                form_placeholder_msg: "Décrivez votre besoin...",
+                form_btn: "Envoyer ma demande",
+                form_success: "Merci ! Votre message a été envoyé avec succès. Nous vous recontacterons sous 24h.",
+                footer_copy: "© 2024 TechVision Solutions. Tous droits réservés."
+            },
+            en: {
+                nav_services: "Services",
+                nav_about: "Our Approach",
+                nav_contact: "Get a Quote",
+                hero_title_pre: "Turn your ideas into",
+                hero_title_highlight: "Digital Reality",
+                hero_desc: "We design high-performance business software and websites, fully customized to drive your growth.",
+                hero_btn_services: "Discover Services",
+                hero_btn_contact: "Talk to an Expert",
+                services_title: "Our Core Expertise",
+                services_subtitle: "Technical expertise serving your ambitions.",
+                about_title_pre: "More than a provider,",
+                about_title_highlight: "your tech partner.",
+                about_desc: "We don't just deliver code. We support you from the ideation phase to production and beyond.",
+                partners_title: "Our Partners",
+                partners_subtitle: "They trust us with their strategic projects.",
+                contact_title: "Let's start your project",
+                contact_subtitle: "Tell us about your tech challenges.",
+                // Nouveaux ajouts
+                service_1_title: "Software Development",
+                service_1_desc: "ERP, CRM solutions, or specific internal tools. We build robust and scalable software that adapts to your unique business processes.",
+                service_1_li_1: "Scalable Architecture",
+                service_1_li_2: "Maximum Data Security",
+                service_1_li_3: "Third-party API Integration",
+                service_2_title: "Website Creation",
+                service_2_desc: "From elegant showcase sites to complex e-commerce platforms. We focus on User Experience (UX) and SEO performance.",
+                service_2_li_1: "Mobile-First Design",
+                service_2_li_2: "Speed Optimization (Core Web Vitals)",
+                service_2_li_3: "Intuitive Admin Interface",
+                about_feat_1_title: "Total Customization",
+                about_feat_1_desc: "Every line of code is written to specifically meet your needs. No generic templates.",
+                about_feat_2_title: "Support & Consulting",
+                about_feat_2_desc: "Needs analysis, technology choices, team training, and responsive technical support.",
+                stat_1: "Tailor Made",
+                stat_2: "Dedicated Support",
+                form_label_name: "Full Name",
+                form_label_email: "Professional Email",
+                form_label_type: "Project Type",
+                form_label_msg: "Message",
+                form_opt_1: "Software Creation",
+                form_opt_2: "Website Creation",
+                form_opt_3: "Consulting / Support",
+                form_opt_4: "Other",
+                form_placeholder_msg: "Describe your needs...",
+                form_btn: "Send Request",
+                form_success: "Thank you! Your message has been sent successfully. We will get back to you within 24h.",
+                footer_copy: "© 2024 TechVision Solutions. All rights reserved."
+            }
+        };
+
+        let currentLang = 'fr';
+        const langToggle = document.getElementById('langToggle');
+        const langLabel = document.getElementById('langLabel');
+
+        langToggle.addEventListener('click', () => {
+            // Bascule de langue
+            currentLang = currentLang === 'fr' ? 'en' : 'fr';
+            
+            // Mise à jour du label
+            langLabel.textContent = currentLang.toUpperCase();
+            
+            // Mise à jour des textes
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (translations[currentLang][key]) {
+                    // Si l'élément contient une icône (comme les listes), on ne remplace que le texte
+                    if (el.children.length > 0 && el.tagName === 'LI') {
+                         // On garde l'icône et on change le texte après
+                         const icon = el.firstElementChild.outerHTML;
+                         el.innerHTML = icon + ' ' + translations[currentLang][key];
+                    } else {
+                        el.textContent = translations[currentLang][key];
+                    }
+                }
+            });
+            // Mise à jour des placeholders
+            document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+                const key = el.getAttribute('data-i18n-placeholder');
+                if (translations[currentLang][key]) {
+                    el.placeholder = translations[currentLang][key];
+                }
+            });
+        });
+
+        // Gestion simple de la soumission du formulaire
+        document.getElementById('contactForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Simulation d'envoi
+            const btn = this.querySelector('button');
+            const feedback = document.getElementById('formFeedback');
+            
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Envoi en cours...';
+            btn.disabled = true;
+
+            setTimeout(() => {
+                this.classList.add('hidden');
+                feedback.classList.remove('hidden');
+            }, 1500);
+        });
+
+        // Animation de la barre de navigation au défilement
+        window.addEventListener('scroll', function() {
+            const nav = document.querySelector('nav');
+            if (window.scrollY > 50) {
+                nav.style.padding = '0.5rem 0';
+                nav.style.background = 'rgba(15, 23, 42, 0.9)';
+            } else {
+                nav.style.padding = '1rem 0';
+                nav.style.background = 'rgba(30, 41, 59, 0.7)';
+            }
+        });
+    </script>
+</body>
+</html>
