@@ -59,6 +59,8 @@ class CameraThread(QThread):
         self.camera: Optional[CameraEngine] = None
         self.camera_index = camera_index
         self.running = False
+        self.fps_divisor = 1   # 1 = 30fps, 2 = 15fps (une frame sur deux)
+        self._frame_counter = 0
 
     def run(self) -> None:
         """Boucle principale du thread."""
@@ -66,19 +68,29 @@ class CameraThread(QThread):
             self.camera = CameraEngine(self.camera_index)
             if not self.camera.is_ready():
                 raise Exception("Impossible d'initialiser la caméra.\nEst-elle bien branchée ?")
-            
+
             self.running = True
+            self._frame_counter = 0
+            self.camera.record_skip = self.fps_divisor
             self.camera_started.emit()
-            
-            while self.running: 
+
+            while self.running:
                 frame, pupil_data = self.camera.grab_and_detect()
                 if frame is None:
                     raise Exception("Perte du signal vidéo (Déconnexion).")
-                
-                self.frame_ready.emit(frame)
-                if pupil_data:
-                    self.pupil_detected.emit(pupil_data)
-                
+
+                self._frame_counter += 1
+
+                # Émission du FPS effectif (après diviseur) toutes les 15 frames raw
+                if self._frame_counter % 15 == 0:
+                    self.fps_updated.emit(self.camera.fps / self.fps_divisor)
+
+                # Envoi frame + données uniquement si on n'est pas en mode skip
+                if self._frame_counter % self.fps_divisor == 0:
+                    self.frame_ready.emit(frame)
+                    if pupil_data:
+                        self.pupil_detected.emit(pupil_data)
+
                 self.msleep(1)
         except Exception as e:
             self.error_occurred.emit(str(e))
@@ -89,6 +101,12 @@ class CameraThread(QThread):
     def stop(self):
         self.running = False
         self.wait(2000)
+
+    def set_fps(self, fps: int):
+        """Définit le mode FPS : 30 (normal) ou 15 (une frame sur deux)."""
+        self.fps_divisor = 1 if fps >= 30 else 2
+        if self.camera:
+            self.camera.record_skip = self.fps_divisor
 
     def set_threshold(self, v: int):
         if self.camera: self.camera.set_threshold(v)
@@ -116,6 +134,7 @@ class ControlPanel(QWidget):
     threshold_changed = Signal(int)
     blur_changed = Signal(int)
     display_mode_changed = Signal(str)
+    fps_changed = Signal(int)
     test_requested = Signal()
     settings_requested = Signal()
     reset_camera_requested = Signal()
@@ -156,7 +175,15 @@ class ControlPanel(QWidget):
         self.st=QSlider(Qt.Horizontal); self.st.setRange(0,255); self.st.setValue(50); self.st.valueChanged.connect(self.threshold_changed.emit)
         self.sb=QSlider(Qt.Horizontal); self.sb.setRange(1,21); self.sb.setValue(5); self.sb.valueChanged.connect(self.blur_changed.emit)
         self.cm=QComboBox(); self.cm.addItems(["Normal","ROI","Binaire","Mosaïque"]); self.cm.currentTextChanged.connect(lambda t:self._on_mode(t))
-        fl.addWidget(QLabel(self.tr("Seuil"))); fl.addWidget(self.st); fl.addWidget(QLabel(self.tr("Flou"))); fl.addWidget(self.sb); fl.addWidget(QLabel(self.tr("Vue"))); fl.addWidget(self.cm); gs.setLayout(fl); l.addWidget(gs)
+        # Sélecteur FPS
+        self.fps_grp = QButtonGroup(self)
+        self.rb_30fps = QRadioButton("30 fps"); self.rb_30fps.setChecked(True)
+        self.rb_15fps = QRadioButton("15 fps")
+        self.fps_grp.addButton(self.rb_30fps); self.fps_grp.addButton(self.rb_15fps)
+        hfps = QHBoxLayout(); hfps.addWidget(self.rb_30fps); hfps.addWidget(self.rb_15fps)
+        wfps = QWidget(); wfps.setLayout(hfps)
+        self.fps_grp.buttonClicked.connect(lambda: self.fps_changed.emit(30 if self.rb_30fps.isChecked() else 15))
+        fl.addWidget(QLabel(self.tr("Seuil"))); fl.addWidget(self.st); fl.addWidget(QLabel(self.tr("Flou"))); fl.addWidget(self.sb); fl.addWidget(QLabel(self.tr("Vue"))); fl.addWidget(self.cm); fl.addWidget(QLabel(self.tr("FPS"))); fl.addWidget(wfps); gs.setLayout(fl); l.addWidget(gs)
         
         # BOUTON LANCER
         self.bt=QPushButton(self.tr("▶ LANCER EXAMEN")); self.bt.setFixedHeight(45); self.bt.setStyleSheet("background:#28a745;color:white;font-weight:bold;border-radius:5px;"); self.bt.clicked.connect(self.test_requested.emit)
@@ -268,7 +295,11 @@ class MainWindow(QMainWindow):
         self.lbl_hw_status = QLabel(self.tr("Appareil: ?"))
         self.lbl_hw_status.setAlignment(Qt.AlignCenter); self.lbl_hw_status.setFixedSize(120, 35)
         
-        top_bar.addWidget(self.lbl_cam_status); top_bar.addWidget(self.lbl_hw_status); top_bar.addStretch()
+        self.lbl_fps_status = QLabel("-- FPS")
+        self.lbl_fps_status.setAlignment(Qt.AlignCenter); self.lbl_fps_status.setFixedSize(80, 35)
+        self.lbl_fps_status.setStyleSheet("background-color:#e8f5e9; color:#1b5e20; border:2px solid #a5d6a7; border-radius:5px; font-weight:bold; font-size:13px;")
+
+        top_bar.addWidget(self.lbl_cam_status); top_bar.addWidget(self.lbl_hw_status); top_bar.addWidget(self.lbl_fps_status); top_bar.addStretch()
         main_lay.addLayout(top_bar)
         
         # --- CONTENU PRINCIPAL ---
@@ -277,6 +308,7 @@ class MainWindow(QMainWindow):
         self.controls.threshold_changed.connect(lambda v: self.camera_thread.set_threshold(v))
         self.controls.blur_changed.connect(lambda v: self.camera_thread.set_blur(v))
         self.controls.display_mode_changed.connect(lambda m: self.camera_thread.set_display_mode(m))
+        self.controls.fps_changed.connect(lambda fps: self.camera_thread.set_fps(fps))
         
         p = self.conf.config.get("protocol", {})
         self.controls.set_intensity_percent(int((p.get("flash_intensity", 65536)/65536.0)*100))
@@ -305,7 +337,9 @@ class MainWindow(QMainWindow):
         self.btn_compare.setStyleSheet("background:#6f42c1;color:white;font-weight:bold;padding:5px;")
         
         self.btn_update_comment.setStyleSheet("background:#007bff;color:white;font-weight:bold;padding:5px;"); self.btn_pdf.setStyleSheet("background:#17a2b8;color:white;font-weight:bold;padding:5px;")
-        hl_act.addWidget(self.btn_save); hl_act.addWidget(self.btn_discard); hl_act.addWidget(self.btn_update_comment); hl_act.addWidget(self.btn_pdf); hl_act.addWidget(self.btn_excel); hl_act.addWidget(self.btn_compare)
+        self.btn_frames = QPushButton(self.tr("Film frame par frame")); self.btn_frames.clicked.connect(self.open_frames_viewer)
+        self.btn_frames.setStyleSheet("background:#795548;color:white;font-weight:bold;padding:5px;")
+        hl_act.addWidget(self.btn_save); hl_act.addWidget(self.btn_discard); hl_act.addWidget(self.btn_update_comment); hl_act.addWidget(self.btn_pdf); hl_act.addWidget(self.btn_excel); hl_act.addWidget(self.btn_compare); hl_act.addWidget(self.btn_frames)
         self.grp_actions.setLayout(hl_act); self.grp_actions.setVisible(False)
         
         self.grp_com = QGroupBox(self.tr("Rapport / Commentaires")); vl_com = QVBoxLayout(); hl_mac = QHBoxLayout()
@@ -320,10 +354,12 @@ class MainWindow(QMainWindow):
         self.table_hist.setSortingEnabled(True); self.table_hist.setContextMenuPolicy(Qt.CustomContextMenu); self.table_hist.customContextMenuRequested.connect(self.show_history_menu); self.table_hist.itemClicked.connect(self.on_history_clicked); vl_hist.addWidget(self.table_hist); self.grp_hist.setLayout(vl_hist)
         
         bl.addWidget(self.grp_actions); bl.addWidget(self.grp_com); bl.addWidget(self.grp_hist)
-        right_split.addWidget(self.graph_widget); right_split.addWidget(bottom_w); right_split.setStretchFactor(0, 5); right_split.setStretchFactor(1, 5)
-        
+        self.right_split = QSplitter(Qt.Vertical)
+        self.right_split.addWidget(self.graph_widget); self.right_split.addWidget(bottom_w)
+        QTimer.singleShot(0, self._restore_splitter)
+
         splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(left); splitter.addWidget(right_split); splitter.setSizes([500,900])
+        splitter.addWidget(left); splitter.addWidget(self.right_split); splitter.setSizes([500,900])
         
         main_lay.addWidget(splitter)
         
@@ -333,6 +369,17 @@ class MainWindow(QMainWindow):
         self.lbl_flash_indicator.setVisible(False)
         self.status.addPermanentWidget(self.lbl_flash_indicator)
         self._create_menu(); self.load_patient_history(); self._set_ui_state("IDLE")
+
+    def _restore_splitter(self):
+        """Restaure la position du séparateur graphique/historique depuis la config."""
+        saved = self.conf.get("ui", "right_split_sizes", None)
+        if saved and len(saved) == 2:
+            self.right_split.setSizes(saved)
+        else:
+            # Défaut : 55% graphique, 45% historique
+            total = sum(self.right_split.sizes())
+            if total > 0:
+                self.right_split.setSizes([int(total * 0.55), int(total * 0.45)])
 
     def set_camera_status(self, connected: bool):
         if connected:
@@ -450,7 +497,7 @@ class MainWindow(QMainWindow):
         act_all = menu_select.addAction(self.tr("Tout cocher")); act_none = menu_select.addAction(self.tr("Tout décocher"))
         act_od = menu_select.addAction(self.tr("Cocher OD uniquement")); act_og = menu_select.addAction(self.tr("Cocher OG uniquement"))
         menu.addSeparator()
-        action_view = None; action_pdf = None; action_xls = None; action_del = None
+        action_view = None; action_pdf = None; action_xls = None; action_del = None; action_frames = None
         if item:
             self.table_hist.selectRow(item.row())
             chk_item = self.table_hist.item(item.row(), 7)
@@ -459,6 +506,9 @@ class MainWindow(QMainWindow):
                 action_view = menu.addAction(self.tr("👁️ Voir / Éditer"))
                 action_pdf = menu.addAction(self.tr("📄 Exporter PDF"))
                 action_xls = menu.addAction(self.tr("📊 Exporter Excel (Data)"))
+                frames_dir = ex_data.get('csv_path', '').replace('.csv', '_frames')
+                if os.path.isdir(frames_dir):
+                    action_frames = menu.addAction(self.tr("Film frame par frame"))
                 menu.addSeparator()
                 action_del = menu.addAction(self.tr("🗑️ Supprimer l'examen"))
             else: ex_data = None
@@ -470,6 +520,7 @@ class MainWindow(QMainWindow):
         elif item and action == action_view: self.on_history_clicked(self.table_hist.item(item.row(), 0))
         elif item and action == action_pdf: self.selected_historical_exam = ex_data; self.export_pdf()
         elif item and action == action_xls: self.selected_historical_exam = ex_data; self.export_excel()
+        elif item and action == action_frames: self.selected_historical_exam = ex_data; self.open_frames_viewer()
         elif item and action == action_del: self.delete_history_item(ex_data)
 
     def auto_compare_eyes(self):
@@ -554,16 +605,16 @@ class MainWindow(QMainWindow):
 
     def _set_ui_state(self, state):
         self.btn_save.setVisible(False); self.btn_discard.setVisible(False)
-        self.btn_update_comment.setVisible(False); self.btn_pdf.setVisible(False); self.btn_excel.setVisible(False); self.btn_compare.setVisible(False)
+        self.btn_update_comment.setVisible(False); self.btn_pdf.setVisible(False); self.btn_excel.setVisible(False); self.btn_compare.setVisible(False); self.btn_frames.setVisible(False)
         if state == "IDLE":
             self.grp_actions.setVisible(False); self.txt_comments.clear()
             # Utilisation de la méthode propre clear() qui réinitialise aussi les annotations
             self.graph_widget.clear(); self.temp_result_meta = None
         elif state == "NEW_RESULT":
-            self.grp_actions.setVisible(True); self.btn_save.setVisible(True); self.btn_discard.setVisible(True); self.btn_pdf.setVisible(True); self.btn_excel.setVisible(True); self.btn_compare.setVisible(True)
+            self.grp_actions.setVisible(True); self.btn_save.setVisible(True); self.btn_discard.setVisible(True); self.btn_pdf.setVisible(True); self.btn_excel.setVisible(True); self.btn_compare.setVisible(True); self.btn_frames.setVisible(True)
             self.grp_actions.setTitle(self.tr("Nouveau Résultat (Non enregistré)")); self.grp_actions.setStyleSheet("background-color:#e3f2fd; font-weight:bold;")
         elif state == "HISTORY_VIEW":
-            self.grp_actions.setVisible(True); self.btn_update_comment.setVisible(True); self.btn_pdf.setVisible(True); self.btn_excel.setVisible(True); self.btn_compare.setVisible(True)
+            self.grp_actions.setVisible(True); self.btn_update_comment.setVisible(True); self.btn_pdf.setVisible(True); self.btn_excel.setVisible(True); self.btn_compare.setVisible(True); self.btn_frames.setVisible(True)
             self.grp_actions.setTitle(self.tr("Examen Historique")); self.grp_actions.setStyleSheet("background-color:#f0f4c3; font-weight:bold;")
 
     def start_camera(self):
@@ -573,6 +624,7 @@ class MainWindow(QMainWindow):
         self.camera_thread.camera_started.connect(self.on_camera_started)
         self.camera_thread.error_occurred.connect(self.on_camera_error)
         self.camera_thread.camera_started.connect(self.init_engine)
+        self.camera_thread.fps_updated.connect(lambda fps: self.lbl_fps_status.setText(f"{fps:.0f} FPS"))
         self.camera_thread.start()
 
     def on_camera_started(self): self.is_camera_ready = True; self.set_camera_status(True); self.check_ready_state()
@@ -708,6 +760,37 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, self.tr("Erreur"), f"Erreur lors de l'affichage : {str(e)}")
 
+    def open_frames_viewer(self):
+        """Ouvre le visualiseur frame par frame pour l'examen actuellement affiché."""
+        csv_path = None
+        if self.selected_historical_exam:
+            csv_path = self.selected_historical_exam.get('csv_path')
+        elif self.temp_result_meta:
+            csv_path = self.temp_result_meta.get('csv')
+
+        if not csv_path:
+            QMessageBox.warning(self, self.tr("Aucun examen"), self.tr("Aucun examen sélectionné."))
+            return
+
+        frames_dir = csv_path.replace('.csv', '_frames')
+        if not os.path.isdir(frames_dir):
+            QMessageBox.information(self, self.tr("Frames indisponibles"), self.tr("Le dossier de frames est introuvable :\n{0}\n\nLes enregistrements anciens ne contiennent pas de frames individuelles.").format(frames_dir))
+            return
+
+        data = None
+        results = {}
+        if os.path.exists(csv_path):
+            try:
+                an = PLRAnalyzer()
+                if an.load_data(csv_path):
+                    an.preprocess()
+                    data = an.data
+                    results = an.analyze()
+            except: pass
+
+        d = PLRResultsDialog(self, data=data, results=results, title=self.tr("Film frame par frame"), video_path=frames_dir)
+        d.exec()
+
     def open_frame_viewer(self):
         path = QFileDialog.getExistingDirectory(self, self.tr("Sélectionner le dossier de frames"), "data/plr_results")
         if path:
@@ -811,7 +894,10 @@ class MainWindow(QMainWindow):
     def _show_about(self): QMessageBox.about(self, "Infos", "PLR V3.28")
     def stop_camera(self): (self.camera_thread.stop() if self.camera_thread else None)
     def closeEvent(self, e):
-        try: det = self.conf.config.get("detection", {}); det["canny_threshold1"] = self.controls.st.value(); det["gaussian_blur"] = self.controls.sb.value(); self.conf.config["detection"] = det; self.conf.save()
+        try:
+            det = self.conf.config.get("detection", {}); det["canny_threshold1"] = self.controls.st.value(); det["gaussian_blur"] = self.controls.sb.value(); self.conf.config["detection"] = det
+            self.conf.config.setdefault("ui", {})["right_split_sizes"] = self.right_split.sizes()
+            self.conf.save()
         except: pass
         self.stop_camera()
         self.hw_reconnect_timer.stop()

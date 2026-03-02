@@ -14,18 +14,18 @@ import os
 import glob
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, 
+    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QFrame, QCheckBox, QSpacerItem, QSizePolicy, QSlider, QGroupBox
+    QFrame, QCheckBox, QSpacerItem, QSizePolicy, QSlider, QGroupBox, QMessageBox
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPixmap
 
 import matplotlib
 matplotlib.use('QtAgg')
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
+# from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 
 logger = logging.getLogger(__name__)
@@ -39,19 +39,34 @@ class PLRGraphWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        self.current_data_list = [] 
+        self.current_data_list = []
         self.display_mode = 'smooth' # 'smooth' ou 'raw'
-        self.current_df = None      
-        self.cursors = [] 
-        self.is_erasing = False 
+        self.current_df = None
+        self.cursors = []
+        self.is_erasing = False
+
+        # Curseur de synchronisation frame/graphique
+        self._sync_line = None
+
+        # Navigation (zoom / pan)
+        self._is_panning = False
+        self._pan_start_px = None
+        self._pan_start_xlim = None
+        self._pan_start_ylim = None
+        self._home_xlim = None
+        self._home_ylim = None
         
         # Toolbar Container
         toolbar_container = QWidget()
+        toolbar_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         tb_layout = QHBoxLayout(toolbar_container)
         tb_layout.setContentsMargins(0, 0, 5, 0)
         
         self.fig = Figure(figsize=(5, 4), dpi=100)
+        self.fig.subplots_adjust(left=0.10, right=0.97, top=0.95, bottom=0.10)
         self.canvas = FigureCanvas(self.fig)
+        self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.canvas.updateGeometry()
         self.axes = self.fig.add_subplot(111)
         self.fig.patch.set_facecolor('white')
         self.axes.set_facecolor('#f8f9fa')
@@ -60,15 +75,25 @@ class PLRGraphWidget(QWidget):
         self.hover_annot = None
         self._init_annotation()
         
-        self.mpl_toolbar = NavigationToolbar(self.canvas, self)
+        # self.mpl_toolbar = NavigationToolbar(self.canvas, self)
         
         self.btn_mode = QPushButton("Mode: LISSÉ")
         self.btn_mode.setCheckable(True); self.btn_mode.setChecked(True)
         self.btn_mode.setStyleSheet("background-color: #28a745; color: white; font-weight: bold; padding: 5px;")
         self.btn_mode.clicked.connect(self.toggle_mode)
-        
-        tb_layout.addWidget(self.mpl_toolbar)
+
+        self.btn_reset_view = QPushButton("↺ Vue initiale")
+        self.btn_reset_view.setStyleSheet("background-color: #6c757d; color: white; font-weight: bold; padding: 5px;")
+        self.btn_reset_view.setToolTip("Remettre la vue à son état initial (Zoom / Position)")
+        self.btn_reset_view.clicked.connect(self.reset_view)
+
+        lbl_nav = QLabel("  Molette: Zoom  |  Clic molette + glisser: Déplacer")
+        lbl_nav.setStyleSheet("color: #888; font-size: 10px;")
+
+        # tb_layout.addWidget(self.mpl_toolbar)
+        tb_layout.addWidget(lbl_nav)
         tb_layout.addStretch()
+        tb_layout.addWidget(self.btn_reset_view)
         tb_layout.addWidget(self.btn_mode)
         
         layout.addWidget(toolbar_container)
@@ -77,6 +102,7 @@ class PLRGraphWidget(QWidget):
         self.canvas.mpl_connect('motion_notify_event', self.on_mouse_hover)
         self.canvas.mpl_connect('button_press_event', self.on_mouse_click)
         self.canvas.mpl_connect('button_release_event', self.on_mouse_release)
+        self.canvas.mpl_connect('scroll_event', self.on_scroll)
 
     def _init_annotation(self):
         """Crée l'objet annotation (Invisible par défaut)."""
@@ -143,10 +169,64 @@ class PLRGraphWidget(QWidget):
             unique = [(h, l) for i, (h, l) in enumerate(zip(handles, labels)) if l not in labels[:i]]
             self.axes.legend(*zip(*unique), loc='upper right', fontsize='small')
         self.canvas.draw()
+        if clear:
+            self._sync_line = None
+            self._save_home_limits()
+
+    # --- NAVIGATION (ZOOM / PAN / RESET) ---
+    def on_scroll(self, event):
+        """Zoom centré sur la position de la souris via la molette."""
+        if event.inaxes != self.axes or event.xdata is None: return
+        factor = 1.15 if event.button == 'up' else 1.0 / 1.15
+        xdata, ydata = event.xdata, event.ydata
+        xlim = self.axes.get_xlim()
+        ylim = self.axes.get_ylim()
+        self.axes.set_xlim([xdata - (xdata - xlim[0]) / factor, xdata + (xlim[1] - xdata) / factor])
+        self.axes.set_ylim([ydata - (ydata - ylim[0]) / factor, ydata + (ylim[1] - ydata) / factor])
+        self.canvas.draw_idle()
+
+    def _save_home_limits(self):
+        """Mémorise les limites actuelles comme vue de référence (reset)."""
+        self._home_xlim = self.axes.get_xlim()
+        self._home_ylim = self.axes.get_ylim()
+
+    def reset_view(self):
+        """Restaure la vue initiale du graphique."""
+        if self._home_xlim and self._home_ylim:
+            self.axes.set_xlim(self._home_xlim)
+            self.axes.set_ylim(self._home_ylim)
+            self.canvas.draw_idle()
+
+    def set_sync_cursor(self, t: float):
+        """Affiche un curseur bleu pointillé sur le graphique à la position t (synchronisation film)."""
+        if self._sync_line is not None:
+            try: self._sync_line.remove()
+            except: pass
+            self._sync_line = None
+        if t is not None and self.current_df is not None:
+            self._sync_line = self.axes.axvline(
+                x=t, color='#1976d2', linestyle='--', linewidth=1.5, alpha=0.85)
+        self.canvas.draw_idle()
 
     # --- SOURIS / CURSEUR LIVE ---
     def on_mouse_hover(self, event):
-        if event.inaxes != self.axes or self.mpl_toolbar.mode:
+        # PAN : déplacement avec clic molette maintenu
+        if self._is_panning:
+            if event.x is None or self._pan_start_px is None: return
+            bbox = self.axes.get_window_extent()
+            if bbox.width == 0 or bbox.height == 0: return
+            dx_px = event.x - self._pan_start_px[0]
+            dy_px = event.y - self._pan_start_px[1]
+            xlim = self._pan_start_xlim
+            ylim = self._pan_start_ylim
+            dx = -dx_px * (xlim[1] - xlim[0]) / bbox.width
+            dy = -dy_px * (ylim[1] - ylim[0]) / bbox.height
+            self.axes.set_xlim([xlim[0] + dx, xlim[1] + dx])
+            self.axes.set_ylim([ylim[0] + dy, ylim[1] + dy])
+            self.canvas.draw_idle()
+            return
+
+        if event.inaxes != self.axes: # or self.mpl_toolbar.mode:
             if self.hover_annot: self.hover_annot.set_visible(False)
             self.canvas.draw_idle()
             return
@@ -185,13 +265,25 @@ class PLRGraphWidget(QWidget):
             self.canvas.draw_idle()
 
     def on_mouse_click(self, event):
-        if event.inaxes != self.axes or self.mpl_toolbar.mode: return
-        if event.button == 1: self.add_persistent_cursor(event.xdata)
+        if event.inaxes != self.axes: return # or self.mpl_toolbar.mode: return
+        if event.button == 2:  # Clic molette → début du pan
+            self._is_panning = True
+            self._pan_start_px = (event.x, event.y)
+            self._pan_start_xlim = list(self.axes.get_xlim())
+            self._pan_start_ylim = list(self.axes.get_ylim())
+            self.setCursor(Qt.SizeAllCursor)
+        elif event.button == 1:
+            self.add_persistent_cursor(event.xdata)
         elif event.button == 3:
             self.is_erasing = True; self.setCursor(Qt.ForbiddenCursor); self.check_and_erase(event.xdata)
 
     def on_mouse_release(self, event):
-        if event.button == 3: self.is_erasing=False; self.setCursor(Qt.ArrowCursor)
+        if event.button == 2:  # Fin du pan
+            self._is_panning = False
+            self._pan_start_px = None
+            self.setCursor(Qt.ArrowCursor)
+        elif event.button == 3:
+            self.is_erasing = False; self.setCursor(Qt.ArrowCursor)
 
     def check_and_erase(self, mouse_x):
         if not self.cursors or mouse_x is None: return
@@ -236,71 +328,128 @@ class PLRGraphWidget(QWidget):
         self.refresh_plot(clear=True)
 
 class VideoPlayerWidget(QWidget):
-    """Lecteur capable de lire un dossier d'images ou un fichier vidéo."""
-    def __init__(self, video_path):
+    """Lecteur frame par frame avec horodatage et detection de frame noire (flash IR)."""
+
+    frame_changed = Signal(float)  # Emet le timestamp_s de la frame affichee
+
+    def __init__(self, video_path, df=None):
         super().__init__()
         self.video_path = video_path
+        self.df = df          # DataFrame CSV pour recuperer le timestamp de chaque frame
         self.mode = "unknown"
         self.image_files = []
         self.cap = None
-        
-        # Détection du type de source
+        self.setFocusPolicy(Qt.StrongFocus)
+
         if os.path.isdir(video_path):
             self.mode = "images"
-            # Récupération des images triées
             self.image_files = sorted(glob.glob(os.path.join(video_path, "*.jpg")))
             self.total_frames = len(self.image_files)
         else:
             self.mode = "video"
             self.cap = cv2.VideoCapture(video_path)
             self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        
+
         layout = QVBoxLayout(self)
-        
-        self.lbl_video = QLabel("Vidéo non disponible")
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
+        self.lbl_video = QLabel("Film non disponible")
         self.lbl_video.setAlignment(Qt.AlignCenter)
         self.lbl_video.setMinimumSize(320, 240)
         self.lbl_video.setStyleSheet("background: black; border: 1px solid #555;")
         layout.addWidget(self.lbl_video)
-        
+
+        # Barre de navigation
         ctrl_layout = QHBoxLayout()
+        btn_prev = QPushButton("◀"); btn_prev.setFixedWidth(30)
+        btn_prev.clicked.connect(lambda: self.slider.setValue(self.slider.value() - 1))
+        btn_next = QPushButton("▶"); btn_next.setFixedWidth(30)
+        btn_next.clicked.connect(lambda: self.slider.setValue(self.slider.value() + 1))
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setRange(0, max(0, self.total_frames - 1))
         self.slider.valueChanged.connect(self.seek_frame)
-        
-        btn_prev = QPushButton("◀"); btn_prev.setFixedWidth(30); btn_prev.clicked.connect(lambda: self.slider.setValue(self.slider.value()-1))
-        btn_next = QPushButton("▶"); btn_next.setFixedWidth(30); btn_next.clicked.connect(lambda: self.slider.setValue(self.slider.value()+1))
-        
-        self.lbl_frame = QLabel("0 / 0")
-        
+        self.lbl_frame = QLabel("—")
+        self.lbl_frame.setMinimumWidth(200)
         ctrl_layout.addWidget(btn_prev)
         ctrl_layout.addWidget(self.slider)
         ctrl_layout.addWidget(btn_next)
         ctrl_layout.addWidget(self.lbl_frame)
         layout.addLayout(ctrl_layout)
-        
+
+        # Barre de detection frame noire
+        act_layout = QHBoxLayout()
+        self.btn_black = QPushButton("Trouver frame noire (flash IR)")
+        self.btn_black.setToolTip(
+            "Recherche la premiere frame totalement sombre.\n"
+            "Correspond au moment de coupure de l'eclairage IR (= instant du flash).")
+        self.btn_black.setStyleSheet(
+            "background:#e67e22; color:white; padding:4px; border-radius:3px; font-weight:bold;")
+        self.btn_black.clicked.connect(self._find_black_frame)
+        self.lbl_black_status = QLabel("")
+        self.lbl_black_status.setStyleSheet("color:#e67e22; font-weight:bold;")
+        act_layout.addWidget(self.btn_black)
+        act_layout.addWidget(self.lbl_black_status)
+        act_layout.addStretch()
+        layout.addLayout(act_layout)
+
+        lbl_tip = QLabel("Fleches gauche / droite du clavier : frame precedente / suivante")
+        lbl_tip.setStyleSheet("color:#aaa; font-size:9px;")
+        layout.addWidget(lbl_tip)
+
         if self.total_frames > 0:
             self.seek_frame(0)
-            
+
     def seek_frame(self, frame_idx):
         frame = None
-        
         if self.mode == "images":
             if 0 <= frame_idx < len(self.image_files):
-                path = self.image_files[frame_idx]
-                frame = cv2.imread(path)
+                frame = cv2.imread(self.image_files[frame_idx])
         elif self.mode == "video":
             if self.cap and self.cap.isOpened():
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
                 ret, f = self.cap.read()
                 if ret: frame = f
-            
+
         if frame is not None:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            h, w, ch = frame.shape
-            img = QImage(frame.data, w, h, ch * w, QImage.Format_RGB888)
-            self.lbl_video.setPixmap(QPixmap.fromImage(img).scaled(self.lbl_video.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            self.lbl_frame.setText(f"{frame_idx} / {self.total_frames}")
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb.shape
+            img = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
+            self.lbl_video.setPixmap(
+                QPixmap.fromImage(img).scaled(
+                    self.lbl_video.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+        # Horodatage : frame N → ligne N du CSV
+        timestamp = None
+        if self.df is not None and not self.df.empty and frame_idx < len(self.df):
+            timestamp = float(self.df['timestamp_s'].iat[frame_idx])
+
+        ts_str = f"   t = {timestamp:.3f} s" if timestamp is not None else ""
+        self.lbl_frame.setText(f"Frame {frame_idx + 1} / {self.total_frames}{ts_str}")
+
+        if timestamp is not None:
+            self.frame_changed.emit(timestamp)
+
+    def _find_black_frame(self):
+        """Recherche la premiere frame sombre : coupure IR = instant du flash."""
+        if self.mode != "images" or not self.image_files:
+            self.lbl_black_status.setText("Non disponible")
+            return
+        for i, path in enumerate(self.image_files):
+            gray = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+            if gray is not None and np.mean(gray) < 15:
+                self.lbl_black_status.setText(f"Frame noire : #{i + 1}")
+                self.slider.setValue(i)
+                return
+        self.lbl_black_status.setText("Aucune frame noire trouvee")
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Left:
+            self.slider.setValue(max(0, self.slider.value() - 1))
+        elif event.key() == Qt.Key_Right:
+            self.slider.setValue(min(self.total_frames - 1, self.slider.value() + 1))
+        else:
+            super().keyPressEvent(event)
 
 class PLRResultsDialog(QDialog):
     def __init__(self, parent=None, data=None, results=None, title="Détail Examen", video_path=None):
@@ -343,10 +492,13 @@ class PLRResultsDialog(QDialog):
         
         main_layout.addWidget(left_col, stretch=2)
         
-        # COLONNE DROITE : Vidéo (si dispo)
+        # COLONNE DROITE : Film frame par frame (si dispo)
         if video_path:
-            right_col = QGroupBox("Film de l'examen"); right_layout = QVBoxLayout(right_col)
-            self.player = VideoPlayerWidget(video_path)
+            right_col = QGroupBox("Film de l'examen (frame par frame)")
+            right_layout = QVBoxLayout(right_col)
+            self.player = VideoPlayerWidget(video_path, df=data)
+            # Synchronisation : deplacement dans le film → curseur bleu sur le graphique
+            self.player.frame_changed.connect(self.graph.set_sync_cursor)
             right_layout.addWidget(self.player)
             right_layout.addStretch()
             main_layout.addWidget(right_col, stretch=1)

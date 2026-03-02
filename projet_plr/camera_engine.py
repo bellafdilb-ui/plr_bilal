@@ -48,6 +48,8 @@ class CameraEngine:
         self.recording = False
         self.start_time = 0.0
         self.last_valid_diameter = 0.0 # Pour la continuité lors de la Black Frame
+        self.record_skip = 1       # 1 = 30fps, 2 = 15fps (une frame sur deux)
+        self._record_counter = 0
         # -------------------------------------------------------
         
         self.open_camera()
@@ -132,7 +134,8 @@ class CameraEngine:
             self.frames_dir = base_path + "_frames"
             os.makedirs(self.frames_dir, exist_ok=True)
             self.frame_count = 0
-            
+            self._record_counter = 0
+
             self.start_time = time.time()
             self.recording = True
         except Exception as e:
@@ -190,7 +193,9 @@ class CameraEngine:
             return None, None
         
         now = time.time()
-        if (now - self.last_time) > 0: self.fps = 1.0 / (now - self.last_time)
+        if (now - self.last_time) > 0:
+            instant = 1.0 / (now - self.last_time)
+            self.fps = instant if self.fps == 0.0 else (0.8 * self.fps + 0.2 * instant)
         self.last_time = now
         
         try:
@@ -277,19 +282,21 @@ class CameraEngine:
 
             # ENREGISTREMENT
             if self.recording:
-                # CSV
-                if pupil_data and hasattr(self, 'csv_file') and self.csv_file and not self.csv_file.closed:
-                    try:
-                        t_rel = time.time() - self.start_time
-                        self.csv_file.write(f"{t_rel:.3f},{pupil_data['diameter_mm']:.3f},{pupil_data['quality_score']},{avg_brightness:.1f}\n")
-                    except: pass
-                # FRAMES (Images individuelles)
-                if hasattr(self, 'frames_dir') and self.frames_dir:
-                    try:
-                        fname = f"frame_{self.frame_count:05d}.jpg"
-                        cv2.imwrite(os.path.join(self.frames_dir, fname), vis_frame)
-                        self.frame_count += 1
-                    except: pass
+                self._record_counter += 1
+                if self._record_counter % self.record_skip == 0:
+                    # CSV
+                    if pupil_data and hasattr(self, 'csv_file') and self.csv_file and not self.csv_file.closed:
+                        try:
+                            t_rel = time.time() - self.start_time
+                            self.csv_file.write(f"{t_rel:.3f},{pupil_data['diameter_mm']:.3f},{pupil_data['quality_score']},{avg_brightness:.1f}\n")
+                        except: pass
+                    # FRAMES (Images individuelles)
+                    if hasattr(self, 'frames_dir') and self.frames_dir:
+                        try:
+                            fname = f"frame_{self.frame_count:05d}.jpg"
+                            cv2.imwrite(os.path.join(self.frames_dir, fname), vis_frame)
+                            self.frame_count += 1
+                        except: pass
 
             # 5. RECONSTRUCTION
             cv2.rectangle(vis_frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
