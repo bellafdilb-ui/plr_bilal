@@ -20,10 +20,10 @@ from typing import Optional, Dict, Any
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QSlider, QComboBox, QGroupBox, QMessageBox, 
-    QStatusBar, QProgressBar, QTableWidget, QTableWidgetItem, 
+    QPushButton, QLabel, QSlider, QComboBox, QGroupBox, QMessageBox,
+    QStatusBar, QProgressBar, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QRadioButton, QButtonGroup, QSplitter,
-    QTextEdit, QFileDialog, QSizePolicy, QMenu, QProgressDialog
+    QTextEdit, QFileDialog, QSizePolicy, QMenu, QProgressDialog, QScrollArea
 )
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer, QPoint, QTranslator, QLibraryInfo
 from PySide6.QtGui import QImage, QPixmap, QAction, QColor, QCursor, QKeyEvent
@@ -124,7 +124,7 @@ class CameraThread(QThread):
         if self.camera: self.camera.stop_recording()
 
 class VideoWidget(QLabel):
-    def __init__(self): super().__init__(); self.setAlignment(Qt.AlignCenter); self.setStyleSheet("background:black; border:2px solid #444;"); self.setMinimumSize(400,300)
+    def __init__(self): super().__init__(); self.setAlignment(Qt.AlignCenter); self.setStyleSheet("background:black; border:2px solid #444;"); self.setMinimumSize(320, 240)
     @Slot(np.ndarray)
     def update_frame(self, f): 
         try: self.setPixmap(QPixmap.fromImage(QImage(cv2.cvtColor(f,cv2.COLOR_BGR2RGB).data, f.shape[1], f.shape[0], f.shape[1]*3, QImage.Format_RGB888)).scaled(self.size(), Qt.KeepAspectRatio))
@@ -281,44 +281,56 @@ class MainWindow(QMainWindow):
         else: self.controls.rc_white.setChecked(True)
 
     def setup_ui(self):
-        self.resize(1400, 950)
+        screen = QApplication.primaryScreen().availableGeometry()
+        win_w = min(1400, int(screen.width() * 0.92))
+        win_h = min(950, int(screen.height() * 0.92))
+        self.resize(win_w, win_h)
         central = QWidget(); self.setCentralWidget(central)
-        main_lay = QVBoxLayout(central) # Layout principal Vertical
-        
+        main_lay = QVBoxLayout(central)
+        main_lay.setContentsMargins(4, 2, 4, 4)
+        main_lay.setSpacing(2)
+
         # --- BARRE DE STATUT SUPÉRIEURE ---
         top_bar = QHBoxLayout()
-        top_bar.setContentsMargins(5, 5, 5, 10)
+        top_bar.setContentsMargins(2, 0, 2, 0)
         
         self.lbl_cam_status = QLabel(self.tr("Caméra: ?"))
-        self.lbl_cam_status.setAlignment(Qt.AlignCenter); self.lbl_cam_status.setFixedSize(120, 35)
-        
+        self.lbl_cam_status.setAlignment(Qt.AlignCenter); self.lbl_cam_status.setFixedHeight(30)
+
         self.lbl_hw_status = QLabel(self.tr("Appareil: ?"))
-        self.lbl_hw_status.setAlignment(Qt.AlignCenter); self.lbl_hw_status.setFixedSize(120, 35)
-        
+        self.lbl_hw_status.setAlignment(Qt.AlignCenter); self.lbl_hw_status.setFixedHeight(30)
+
         self.lbl_fps_status = QLabel("-- FPS")
-        self.lbl_fps_status.setAlignment(Qt.AlignCenter); self.lbl_fps_status.setFixedSize(80, 35)
+        self.lbl_fps_status.setAlignment(Qt.AlignCenter); self.lbl_fps_status.setFixedSize(80, 30)
         self.lbl_fps_status.setStyleSheet("background-color:#e8f5e9; color:#1b5e20; border:2px solid #a5d6a7; border-radius:5px; font-weight:bold; font-size:13px;")
 
         top_bar.addWidget(self.lbl_cam_status); top_bar.addWidget(self.lbl_hw_status); top_bar.addWidget(self.lbl_fps_status); top_bar.addStretch()
         main_lay.addLayout(top_bar)
         
         # --- CONTENU PRINCIPAL ---
-        left = QWidget(); ll = QVBoxLayout(left); ll.setContentsMargins(0,0,0,0)
+        left = QSplitter(Qt.Vertical)
         self.video = VideoWidget(); self.controls = ControlPanel()
         self.controls.threshold_changed.connect(lambda v: self.camera_thread.set_threshold(v))
         self.controls.blur_changed.connect(lambda v: self.camera_thread.set_blur(v))
         self.controls.display_mode_changed.connect(lambda m: self.camera_thread.set_display_mode(m))
         self.controls.fps_changed.connect(lambda fps: self.camera_thread.set_fps(fps))
-        
+
         p = self.conf.config.get("protocol", {})
         self.controls.set_intensity_percent(int((p.get("flash_intensity", 65536)/65536.0)*100))
         self.controls.intensity_changed.connect(self.update_hardware_params)
-        
+
         self.controls.test_requested.connect(self.start_test)
         self.controls.reset_camera_requested.connect(self.reset_camera)
         self.controls.reset_hardware_requested.connect(self.reset_hardware)
         self.controls.color_changed.connect(self.update_hardware_params)
-        ll.addWidget(self.video, 3); ll.addWidget(self.controls, 1)
+
+        ctrl_scroll = QScrollArea()
+        ctrl_scroll.setWidget(self.controls)
+        ctrl_scroll.setWidgetResizable(True)
+        ctrl_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        ctrl_scroll.setFrameShape(QScrollArea.NoFrame)
+        left.addWidget(self.video); left.addWidget(ctrl_scroll)
+        left.setSizes([int(win_h * 0.45), int(win_h * 0.45)])
         
         right_split = QSplitter(Qt.Vertical)
         self.graph_widget = PLRGraphWidget()
@@ -359,7 +371,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._restore_splitter)
 
         splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(left); splitter.addWidget(self.right_split); splitter.setSizes([500,900])
+        splitter.addWidget(left); splitter.addWidget(self.right_split); splitter.setSizes([int(win_w * 0.36), int(win_w * 0.64)])
         
         main_lay.addWidget(splitter)
         
@@ -506,8 +518,8 @@ class MainWindow(QMainWindow):
                 action_view = menu.addAction(self.tr("👁️ Voir / Éditer"))
                 action_pdf = menu.addAction(self.tr("📄 Exporter PDF"))
                 action_xls = menu.addAction(self.tr("📊 Exporter Excel (Data)"))
-                frames_dir = ex_data.get('csv_path', '').replace('.csv', '_frames')
-                if os.path.isdir(frames_dir):
+                _csv = ex_data.get('csv_path', '')
+                if os.path.isfile(_csv.replace('.csv', '.avi')) or os.path.isdir(_csv.replace('.csv', '_frames')):
                     action_frames = menu.addAction(self.tr("Film frame par frame"))
                 menu.addSeparator()
                 action_del = menu.addAction(self.tr("🗑️ Supprimer l'examen"))
@@ -772,9 +784,15 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, self.tr("Aucun examen"), self.tr("Aucun examen sélectionné."))
             return
 
+        avi_path = csv_path.replace('.csv', '.avi')
         frames_dir = csv_path.replace('.csv', '_frames')
-        if not os.path.isdir(frames_dir):
-            QMessageBox.information(self, self.tr("Frames indisponibles"), self.tr("Le dossier de frames est introuvable :\n{0}\n\nLes enregistrements anciens ne contiennent pas de frames individuelles.").format(frames_dir))
+        if os.path.isfile(avi_path):
+            video_source = avi_path
+        elif os.path.isdir(frames_dir):
+            video_source = frames_dir
+        else:
+            QMessageBox.information(self, self.tr("Vidéo indisponible"),
+                self.tr("Aucune vidéo trouvée pour cet examen.\n\nFichier attendu :\n{0}").format(avi_path))
             return
 
         data = None
@@ -788,7 +806,7 @@ class MainWindow(QMainWindow):
                     results = an.analyze()
             except: pass
 
-        d = PLRResultsDialog(self, data=data, results=results, title=self.tr("Film frame par frame"), video_path=frames_dir)
+        d = PLRResultsDialog(self, data=data, results=results, title=self.tr("Film frame par frame"), video_path=video_source)
         d.exec()
 
     def open_frame_viewer(self):
@@ -824,9 +842,10 @@ class MainWindow(QMainWindow):
             new = self.txt_comments.toPlainText(); eid = self.selected_historical_exam['id']
             if self.db.update_exam_comment(eid, new): self.load_patient_history(); self.status.showMessage(self.tr("Mis à jour.")); self.selected_historical_exam['comments'] = new
     def discard_exam(self):
-        if self.temp_result_meta: 
-            try: os.remove(self.temp_result_meta['csv']) 
-            except: pass 
+        if self.temp_result_meta:
+            for key in ('csv', 'video_path'):
+                try: os.remove(self.temp_result_meta[key])
+                except: pass
         self._set_ui_state("IDLE")
     def export_pdf(self):
         if self.selected_historical_exam: ex=self.selected_historical_exam; met=ex.get('results_data',{}); lat=ex.get('laterality'); dat=ex.get('exam_date')
@@ -906,6 +925,7 @@ class MainWindow(QMainWindow):
 
 def main():
     os.makedirs("data/plr_results", exist_ok=True)
+    QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication.instance()
     if not app:
         app = QApplication(sys.argv)

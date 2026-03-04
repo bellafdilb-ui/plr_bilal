@@ -43,11 +43,11 @@ class CameraEngine:
         
         # --- INITIALISATION CRITIQUE (C'est ce qui manquait) ---
         self.csv_file = None
-        self.frames_dir = None
-        self.frame_count = 0
+        self.video_writer = None
         self.recording = False
         self.start_time = 0.0
         self.last_valid_diameter = 0.0 # Pour la continuité lors de la Black Frame
+        self.start_time = 0.0
         self.record_skip = 1       # 1 = 30fps, 2 = 15fps (une frame sur deux)
         self._record_counter = 0
         # -------------------------------------------------------
@@ -121,21 +121,26 @@ class CameraEngine:
         """Change le mode d'affichage ('normal', 'roi', 'binary', 'mosaic')."""
         self.display_mode = mode
 
-    def start_recording(self, base_path: str): 
-        """Démarre l'enregistrement CSV et SÉQUENCE D'IMAGES."""
+    def start_recording(self, base_path: str):
+        """Démarre l'enregistrement CSV + VIDÉO AVI."""
         try:
             self.stop_recording()
-            
+
             # 1. CSV
             self.csv_file = open(base_path + ".csv", 'w')
             self.csv_file.write("timestamp_s,diameter_mm,quality_score,brightness\n")
-            
-            # 2. SÉQUENCE D'IMAGES (Dossier de frames)
-            self.frames_dir = base_path + "_frames"
-            os.makedirs(self.frames_dir, exist_ok=True)
-            self.frame_count = 0
-            self._record_counter = 0
 
+            # 2. VIDÉO AVI
+            w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            if w > 0 and h > 0:
+                fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                self.video_writer = cv2.VideoWriter(base_path + ".avi", fourcc, 30.0, (w, h))
+                if not self.video_writer.isOpened():
+                    self.video_writer = None
+                    print("[REC] Avertissement : impossible d'ouvrir le VideoWriter AVI.")
+
+            self._record_counter = 0
             self.start_time = time.time()
             self.recording = True
         except Exception as e:
@@ -143,19 +148,23 @@ class CameraEngine:
             self.recording = False
 
     def stop_recording(self):
-        """Arrête l'enregistrement CSV et ferme le fichier."""
+        """Arrête l'enregistrement CSV, vidéo AVI et ferme les fichiers."""
         self.recording = False
         time.sleep(0.02)
-        
+
         # --- PROTECTION CONTRE L'ERREUR 'NO ATTRIBUTE' ---
         if hasattr(self, 'csv_file') and self.csv_file:
-            try: 
+            try:
                 if not self.csv_file.closed:
                     self.csv_file.close()
             except: pass
             self.csv_file = None
-            
-        self.frames_dir = None
+
+        if hasattr(self, 'video_writer') and self.video_writer:
+            try:
+                self.video_writer.release()
+            except: pass
+            self.video_writer = None
 
     def get_roi_rect(self, w: int, h: int) -> Tuple[int, int, int, int]:
         """
@@ -290,12 +299,10 @@ class CameraEngine:
                             t_rel = time.time() - self.start_time
                             self.csv_file.write(f"{t_rel:.3f},{pupil_data['diameter_mm']:.3f},{pupil_data['quality_score']},{avg_brightness:.1f}\n")
                         except: pass
-                    # FRAMES (Images individuelles)
-                    if hasattr(self, 'frames_dir') and self.frames_dir:
+                    # VIDÉO AVI
+                    if hasattr(self, 'video_writer') and self.video_writer:
                         try:
-                            fname = f"frame_{self.frame_count:05d}.jpg"
-                            cv2.imwrite(os.path.join(self.frames_dir, fname), vis_frame)
-                            self.frame_count += 1
+                            self.video_writer.write(vis_frame)
                         except: pass
 
             # 5. RECONSTRUCTION

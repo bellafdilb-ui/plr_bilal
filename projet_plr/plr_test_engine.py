@@ -131,7 +131,7 @@ class PLRTestEngine(QObject):
             # Métadonnées pour l'analyseur
             meta = {
                 'csv_path': base_path + ".csv",
-                'video_path': base_path + "_frames", # Pointe vers le dossier d'images
+                'video_path': base_path + ".avi",
                 'flash_timestamp': flash_ts,
                 'config': {
                     'baseline_duration': self.baseline_duration,
