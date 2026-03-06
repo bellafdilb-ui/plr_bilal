@@ -16,10 +16,11 @@
     "camera": {
         "index": 0,
         "width": 640,
-        "height": 480
+        "height": 480,
+        "target_fps": 0
     },
     "detection": {
-        "canny_threshold1": 97,
+        "canny_threshold1": 99,
         "gaussian_blur": 21,
         "roi_width": 400,
         "roi_height": 400,

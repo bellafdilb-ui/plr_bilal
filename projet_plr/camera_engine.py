@@ -58,10 +58,10 @@ class CameraEngine:
     def open_camera(self):
         """Tente d'ouvrir la caméra avec différents backends (DSHOW, MSMF, ANY)."""
         print(f"[CAMERA] Ouverture index {self.camera_index}...")
-        
+
         backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
         backend_names = ["DSHOW", "MSMF", "ANY"]
-        
+
         for backend, name in zip(backends, backend_names):
             self.cap = cv2.VideoCapture(self.camera_index, backend)
             if self.cap.isOpened():
@@ -77,15 +77,21 @@ class CameraEngine:
             cam_conf = self.config_manager.config.get("camera", {})
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, cam_conf.get("width", 640))
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cam_conf.get("height", 480))
-            
+
+            # FPS cible : doit être défini AU DÉMARRAGE (DSHOW ne supporte pas le changement à chaud)
+            target_fps = cam_conf.get("target_fps", 0)
+            if target_fps > 0:
+                self.cap.set(cv2.CAP_PROP_FPS, target_fps)
+
             try:
                 self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
                 self.cap.set(cv2.CAP_PROP_EXPOSURE, cam_conf.get("exposure", -5))
             except: pass
-            
+
             rw = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
             rh = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-            print(f"[CAMERA] Résolution : {int(rw)}x{int(rh)}")
+            rf = self.cap.get(cv2.CAP_PROP_FPS)
+            print(f"[CAMERA] Résolution : {int(rw)}x{int(rh)} @ {rf:.0f}fps")
         except Exception as e:
             print(f"[CAMERA] Erreur config : {e}")
 
@@ -121,6 +127,10 @@ class CameraEngine:
         """Change le mode d'affichage ('normal', 'roi', 'binary', 'mosaic')."""
         self.display_mode = mode
 
+    def set_fps_target(self, fps: int):
+        """Mémorise le FPS cible dans la config (sera appliqué au prochain open_camera)."""
+        self.config_manager.config.setdefault("camera", {})["target_fps"] = fps
+
     def start_recording(self, base_path: str):
         """Démarre l'enregistrement CSV + VIDÉO AVI."""
         try:
@@ -134,7 +144,7 @@ class CameraEngine:
             w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             if w > 0 and h > 0:
-                fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                fourcc = cv2.VideoWriter_fourcc(*'MJPG')
                 self.video_writer = cv2.VideoWriter(base_path + ".avi", fourcc, 30.0, (w, h))
                 if not self.video_writer.isOpened():
                     self.video_writer = None
@@ -218,7 +228,7 @@ class CameraEngine:
 
             # --- DETECTION BLACK FRAME (SYNCHRO) ---
             avg_brightness = np.mean(gray_frame)
-            is_black_frame = avg_brightness < 10.0 # Seuil de détection du "trou noir"
+            is_black_frame = avg_brightness < 10.0 # Seuil de détection du "trou noir" (Black Frame hardware)
 
             # 2. ROI CROP
             h, w = vis_frame.shape[:2]

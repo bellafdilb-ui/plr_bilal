@@ -74,10 +74,18 @@ class CameraThread(QThread):
             self.camera.record_skip = self.fps_divisor
             self.camera_started.emit()
 
+            consecutive_failures = 0
+            MAX_FAILURES = 10
+
             while self.running:
                 frame, pupil_data = self.camera.grab_and_detect()
                 if frame is None:
-                    raise Exception("Perte du signal vidéo (Déconnexion).")
+                    consecutive_failures += 1
+                    if consecutive_failures >= MAX_FAILURES:
+                        raise Exception("Perte du signal vidéo (Déconnexion).")
+                    self.msleep(30)
+                    continue
+                consecutive_failures = 0
 
                 self._frame_counter += 1
 
@@ -103,8 +111,8 @@ class CameraThread(QThread):
         self.wait(2000)
 
     def set_fps(self, fps: int):
-        """Définit le mode FPS : 30 (normal) ou 15 (une frame sur deux)."""
-        self.fps_divisor = 1 if fps >= 30 else 2
+        """Définit le diviseur de frames (pour 15fps uniquement)."""
+        self.fps_divisor = 2 if fps == 15 else 1
         if self.camera:
             self.camera.record_skip = self.fps_divisor
 
@@ -177,12 +185,18 @@ class ControlPanel(QWidget):
         self.cm=QComboBox(); self.cm.addItems(["Normal","ROI","Binaire","Mosaïque"]); self.cm.currentTextChanged.connect(lambda t:self._on_mode(t))
         # Sélecteur FPS
         self.fps_grp = QButtonGroup(self)
-        self.rb_30fps = QRadioButton("30 fps"); self.rb_30fps.setChecked(True)
         self.rb_15fps = QRadioButton("15 fps")
-        self.fps_grp.addButton(self.rb_30fps); self.fps_grp.addButton(self.rb_15fps)
-        hfps = QHBoxLayout(); hfps.addWidget(self.rb_30fps); hfps.addWidget(self.rb_15fps)
-        wfps = QWidget(); wfps.setLayout(hfps)
-        self.fps_grp.buttonClicked.connect(lambda: self.fps_changed.emit(30 if self.rb_30fps.isChecked() else 15))
+        self.rb_30fps = QRadioButton("30 fps"); self.rb_30fps.setChecked(True)
+        self.rb_40fps = QRadioButton("40 fps")
+        self.rb_60fps = QRadioButton("60 fps")
+        self.rb_max  = QRadioButton("Max")
+        for rb in (self.rb_15fps, self.rb_30fps, self.rb_40fps, self.rb_60fps, self.rb_max):
+            self.fps_grp.addButton(rb)
+        hfps1 = QHBoxLayout(); hfps1.addWidget(self.rb_15fps); hfps1.addWidget(self.rb_30fps); hfps1.addWidget(self.rb_40fps)
+        hfps2 = QHBoxLayout(); hfps2.addWidget(self.rb_60fps); hfps2.addWidget(self.rb_max)
+        vfps = QVBoxLayout(); vfps.setSpacing(2); vfps.addLayout(hfps1); vfps.addLayout(hfps2)
+        wfps = QWidget(); wfps.setLayout(vfps)
+        self.fps_grp.buttonClicked.connect(lambda: self.fps_changed.emit(self._get_fps_value()))
         fl.addWidget(QLabel(self.tr("Seuil"))); fl.addWidget(self.st); fl.addWidget(QLabel(self.tr("Flou"))); fl.addWidget(self.sb); fl.addWidget(QLabel(self.tr("Vue"))); fl.addWidget(self.cm); fl.addWidget(QLabel(self.tr("FPS"))); fl.addWidget(wfps); gs.setLayout(fl); l.addWidget(gs)
         
         # BOUTON LANCER
@@ -203,6 +217,13 @@ class ControlPanel(QWidget):
     def _on_intensity_change(self, v): self.lbl_intensity.setText(f"{v} %"); self.intensity_changed.emit(v)
     def get_intensity_percent(self): return self.slider_intensity.value()
     def set_intensity_percent(self, v): self.slider_intensity.setValue(v)
+
+    def _get_fps_value(self) -> int:
+        if self.rb_15fps.isChecked(): return 15
+        if self.rb_30fps.isChecked(): return 30
+        if self.rb_40fps.isChecked(): return 40
+        if self.rb_60fps.isChecked(): return 60
+        return 0  # Max = 0 (pas de limite)
 
     def get_selected_eye(self) -> str: return "OD" if self.rod.isChecked() else "OG"
     
@@ -313,7 +334,7 @@ class MainWindow(QMainWindow):
         self.controls.threshold_changed.connect(lambda v: self.camera_thread.set_threshold(v))
         self.controls.blur_changed.connect(lambda v: self.camera_thread.set_blur(v))
         self.controls.display_mode_changed.connect(lambda m: self.camera_thread.set_display_mode(m))
-        self.controls.fps_changed.connect(lambda fps: self.camera_thread.set_fps(fps))
+        self.controls.fps_changed.connect(self.on_fps_changed)
 
         p = self.conf.config.get("protocol", {})
         self.controls.set_intensity_percent(int((p.get("flash_intensity", 65536)/65536.0)*100))
@@ -677,6 +698,14 @@ class MainWindow(QMainWindow):
         self.lbl_flash_indicator.setVisible(active)
         if active:
             self.hardware.lancer_sequence_synchro() # Séquence Synchro (Black Frame)
+
+    def on_fps_changed(self, fps: int):
+        """Change le FPS. Pour 15fps : diviseur seul. Pour les autres : mémorise + reset caméra."""
+        self.camera_thread.set_fps(fps)
+        if fps != 15:
+            # DSHOW ne supporte pas le changement de FPS à chaud → mémorisation + redémarrage
+            self.conf.config.setdefault("camera", {})["target_fps"] = fps
+            self.reset_camera()
 
     def reset_camera(self): self.status.showMessage(self.tr("Reset...")); self.is_camera_ready = False; self.set_camera_status(False); self.check_ready_state(); self.stop_camera(); QTimer.singleShot(1000, self.start_camera)
     
