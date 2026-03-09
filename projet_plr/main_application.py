@@ -17,13 +17,17 @@ import json
 from datetime import datetime
 import logging
 from typing import Optional, Dict, Any
+try:
+    import winsound
+except ImportError:
+    winsound = None
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QSlider, QComboBox, QGroupBox, QMessageBox,
     QStatusBar, QProgressBar, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QRadioButton, QButtonGroup, QSplitter,
-    QTextEdit, QFileDialog, QSizePolicy, QMenu, QProgressDialog, QScrollArea
+    QTextEdit, QFileDialog, QSizePolicy, QMenu, QProgressDialog, QScrollArea, QLineEdit
 )
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer, QPoint, QTranslator, QLibraryInfo
 from PySide6.QtGui import QImage, QPixmap, QAction, QColor, QCursor, QKeyEvent
@@ -255,9 +259,13 @@ class MainWindow(QMainWindow):
         self.real_flash_timestamp = None
         
         self.hardware = HardwareManager()
-        self.hardware.trigger_pressed.connect(self.start_test)
         self.hardware.connection_status_changed.connect(self.on_hardware_status_changed)
         self.hardware.flash_fired.connect(self.on_hardware_flash_fired)
+        self.hardware.flash_ended.connect(self.on_hardware_flash_ended)
+        self.hardware.exam_started.connect(self.on_hardware_exam_started)
+        self.hardware.serial_tx.connect(self._log_serial_tx)
+        self.hardware.serial_rx.connect(self._log_serial_rx)
+        self.hardware.serial_raw.connect(self._log_serial_raw)
         
         # Timer pour la reconnexion automatique du matériel
         self.hw_reconnect_timer = QTimer(self)
@@ -386,7 +394,41 @@ class MainWindow(QMainWindow):
         self.table_hist.setSelectionBehavior(QAbstractItemView.SelectRows); self.table_hist.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table_hist.setSortingEnabled(True); self.table_hist.setContextMenuPolicy(Qt.CustomContextMenu); self.table_hist.customContextMenuRequested.connect(self.show_history_menu); self.table_hist.itemClicked.connect(self.on_history_clicked); vl_hist.addWidget(self.table_hist); self.grp_hist.setLayout(vl_hist)
         
-        bl.addWidget(self.grp_actions); bl.addWidget(self.grp_com); bl.addWidget(self.grp_hist)
+        # --- CONSOLE SÉRIE DEBUG ---
+        self.grp_serial = QGroupBox(self.tr("Console Série (Debug µC)"))
+        vl_serial = QVBoxLayout()
+        self.serial_console = QTextEdit()
+        self.serial_console.setReadOnly(True)
+        self.serial_console.setMaximumHeight(150)
+        self.serial_console.setStyleSheet("background-color:#1e1e1e; color:#00ff00; font-family:Consolas,monospace; font-size:11px;")
+        self.serial_console.setPlaceholderText(self.tr("Les messages série TX/RX apparaîtront ici..."))
+        hl_serial = QHBoxLayout()
+        self.btn_clear_serial = QPushButton(self.tr("Effacer"))
+        self.btn_clear_serial.setStyleSheet("background:#6c757d;color:white;padding:3px 8px;border-radius:3px;")
+        self.btn_clear_serial.clicked.connect(self.serial_console.clear)
+        self.chk_serial_visible = QPushButton(self.tr("Masquer"))
+        self.chk_serial_visible.setStyleSheet("background:#6c757d;color:white;padding:3px 8px;border-radius:3px;")
+        self.chk_serial_visible.clicked.connect(self._toggle_serial_console)
+        hl_serial.addWidget(self.btn_clear_serial)
+        hl_serial.addWidget(self.chk_serial_visible)
+        hl_serial.addStretch()
+        vl_serial.addLayout(hl_serial)
+        vl_serial.addWidget(self.serial_console)
+        # Champ d'envoi manuel de commandes
+        hl_send = QHBoxLayout()
+        self.txt_serial_cmd = QLineEdit()
+        self.txt_serial_cmd.setPlaceholderText("Ex: !version=0;  ou  !marche IR=1;")
+        self.txt_serial_cmd.setStyleSheet("background:#2d2d2d; color:#fff; font-family:Consolas,monospace; font-size:12px; padding:4px; border:1px solid #555; border-radius:3px;")
+        self.txt_serial_cmd.returnPressed.connect(self._send_manual_serial)
+        self.btn_serial_send = QPushButton(self.tr("Envoyer"))
+        self.btn_serial_send.setStyleSheet("background:#0d6efd;color:white;padding:4px 12px;border-radius:3px;font-weight:bold;")
+        self.btn_serial_send.clicked.connect(self._send_manual_serial)
+        hl_send.addWidget(self.txt_serial_cmd, 1)
+        hl_send.addWidget(self.btn_serial_send)
+        vl_serial.addLayout(hl_send)
+        self.grp_serial.setLayout(vl_serial)
+
+        bl.addWidget(self.grp_actions); bl.addWidget(self.grp_com); bl.addWidget(self.grp_hist); bl.addWidget(self.grp_serial)
         self.right_split = QSplitter(Qt.Vertical)
         self.right_split.addWidget(self.graph_widget); self.right_split.addWidget(bottom_w)
         QTimer.singleShot(0, self._restore_splitter)
@@ -430,10 +472,10 @@ class MainWindow(QMainWindow):
             self.lbl_hw_status.setText(self.tr("❌ HW"))
             self.lbl_hw_status.setStyleSheet("background-color: #f8d7da; color: #721c24; border: 2px solid #f5c6cb; border-radius: 5px; font-weight: bold; font-size: 14px;")
 
-    # --- SIMULATION GÂCHETTE CLAVIER ---
+    # --- LANCEMENT PAR CLAVIER ---
     def keyPressEvent(self, event: QKeyEvent):
-        if event.key() == Qt.Key_Space:
-            self.hardware.simulate_trigger_press()
+        if event.key() == Qt.Key_Space and not self.is_test_running:
+            self.start_test()
         super().keyPressEvent(event)
 
     def start_test(self):
@@ -446,9 +488,7 @@ class MainWindow(QMainWindow):
 
         if self.conf.get("general", "enable_beep", True):
             QApplication.beep()
-        self.real_flash_timestamp = None
         self.is_test_running = True
-        self.hardware.set_recording_state(True)
         self.controls.set_button_running(True)
         self._set_ui_state("IDLE")
         self.selected_historical_exam = None
@@ -465,26 +505,80 @@ class MainWindow(QMainWindow):
         # Sécurité : Si le nom est vide ou ne contient que des underscores (ex: "!!!")
         if not safe_name.replace("_", ""):
             safe_name = f"Patient_{self.patient.get('id', 'Unknown')}"
+        # Envoyer la configuration flash au µC juste avant le départ
+        self.update_hardware_params()
         self.engine.start_test(f"{safe_name}_{self.current_laterality}_{self.current_color}")
         self.controls.setEnabled(False)
 
     def on_hardware_flash_fired(self):
-        """Capture le moment précis où le flash hardware est envoyé."""
-        if self.camera_thread and self.camera_thread.camera and self.camera_thread.camera.recording:
-            self.real_flash_timestamp = time.time() - self.camera_thread.camera.start_time
+        """Signal F/f reçu du µC : le flash a été déclenché."""
+        logging.info("Signal µC reçu : Flash déclenché")
+        self.lbl_flash_indicator.setVisible(True)
+
+        if self.is_test_running and self.engine:
+            # Test en cours → notifier le moteur du flash
+            self.engine.notify_flash_fired()
+        elif not self.is_test_running and self.is_camera_ready and self.engine:
+            # Gâchette physique pressée sans avoir lancé l'examen → démarrage auto
+            logging.info("Gâchette physique détectée → Démarrage automatique")
+            self._start_test_from_trigger()
+
+    def on_hardware_flash_ended(self):
+        """Signal A reçu du µC : le flash est terminé."""
+        self.lbl_flash_indicator.setVisible(False)
+
+    def on_hardware_exam_started(self):
+        """Signal D reçu du µC : examen démarré avec retard (flash imminent)."""
+        logging.info("Signal µC : Examen démarré avec retard")
+        if self.is_test_running:
+            self.status.showMessage(self.tr("Flash imminent..."))
+
+    def on_baseline_complete(self):
+        """La baseline est terminée → envoyer la commande de départ au µC."""
+        logging.info("Baseline terminée → Envoi commande départ au µC")
+        self.hardware.start_exam()
+
+    def _start_test_from_trigger(self):
+        """Démarre un test déclenché par la gâchette physique (baseline minimale)."""
+        if self.is_test_running:
+            return
+
+        if self.conf.get("general", "enable_beep", True):
+            QApplication.beep()
+        self.real_flash_timestamp = None
+        self.is_test_running = True
+        self.controls.set_button_running(True)
+        self._set_ui_state("IDLE")
+        self.selected_historical_exam = None
+
+        p = self.conf.config.get("protocol", {})
+        flash_s = p.get("flash_duration_ms", 200) / 1000.0
+        resp = p.get("response_duration", 5.0)
+        # Baseline minimale car le flash est déjà parti
+        self.controls.pb.setRange(0, int((0.5 + flash_s + resp) * 10))
+        self.engine.configure(baseline_duration=0.5, flash_count=1,
+                              flash_duration_ms=int(flash_s * 1000), response_duration=resp)
+        self.current_laterality = self.controls.get_selected_eye()
+        self.current_color = self.controls.get_selected_color()
+
+        safe_name = "".join([c if c.isalnum() else "_" for c in self.patient['name']])
+        if not safe_name.replace("_", ""):
+            safe_name = f"Patient_{self.patient.get('id', 'Unknown')}"
+        self.engine.start_test(f"{safe_name}_{self.current_laterality}_{self.current_color}")
+        # Notifier immédiatement le flash car il est déjà déclenché
+        self.engine.notify_flash_fired()
+        self.controls.setEnabled(False)
 
     def on_test_finished(self, meta):
         self.is_test_running = False
-        self.hardware.set_recording_state(False)
+        self.hardware.stop_flash()
+        self.lbl_flash_indicator.setVisible(False)
         self.controls.set_button_running(False)
         self.controls.setEnabled(True)
         self.controls.pb.setFormat(self.tr("Terminé"))
         self.check_ready_state()
-        
-        # Correction du timestamp si le hardware a tiré (Synchro Graphique)
-        if self.real_flash_timestamp is not None:
-            meta['flash_timestamp'] = self.real_flash_timestamp
-            logging.info(f"Timestamp Flash corrigé (Hardware) : {self.real_flash_timestamp:.3f}s")
+        if winsound:
+            winsound.MessageBeep(winsound.MB_OK)
 
         # Vérification explicite si le fichier est vide ou inexistant
         if not os.path.exists(meta['csv_path']) or os.path.getsize(meta['csv_path']) < 100:
@@ -685,19 +779,12 @@ class MainWindow(QMainWindow):
         self.controls.st.blockSignals(True); self.controls.st.setValue(self.camera_thread.camera.threshold_val); self.controls.st.blockSignals(False)
         self.controls.sb.blockSignals(True); self.controls.sb.setValue(self.camera_thread.camera.blur_val); self.controls.sb.blockSignals(False)
         self.engine = PLRTestEngine(self.camera_thread.camera)
-        
-        # Connexion du signal de flash du moteur vers la méthode de gestion synchronisée
-        self.engine.flash_triggered.connect(self.on_flash_triggered)
-        
+
+        # Connexion des signaux du moteur
+        self.engine.baseline_complete.connect(self.on_baseline_complete)
         self.engine.test_finished.connect(self.on_test_finished)
         self.engine.progress_updated.connect(lambda e, p: [self.controls.pb.setValue(int(e*10)), self.controls.pb.setFormat(f"{p} : {e:.1f}s")])
         self.status.showMessage(self.tr("Prêt"))
-
-    def on_flash_triggered(self, active: bool):
-        """Gère le déclenchement synchronisé (Ecran + Matériel)."""
-        self.lbl_flash_indicator.setVisible(active)
-        if active:
-            self.hardware.lancer_sequence_synchro() # Séquence Synchro (Black Frame)
 
     def on_fps_changed(self, fps: int):
         """Change le FPS. Pour 15fps : diviseur seul. Pour les autres : mémorise + reset caméra."""
@@ -920,26 +1007,57 @@ class MainWindow(QMainWindow):
         self.update_hardware_params()
 
     def _send_initial_hardware_config(self):
-        """Envoie la configuration par défaut au matériel après connexion."""
-        self.update_hardware_params()
+        """Écoute passive à la connexion — aucune commande envoyée."""
+        pass
 
     def update_hardware_params(self):
         """Envoie la configuration complète au matériel (Couleur, Durée, Intensité...)."""
         if not self.hardware.is_connected: return
         
         p = self.conf.config.get("protocol", {})
-        flash_s = p.get("flash_duration_ms", 200) / 1000.0
-        intensity = int((self.controls.get_intensity_percent() / 100.0) * 65536)
-        frequency = p.get("flash_frequency", 0.1)
-        ambiance = p.get("ambiance_intensity", 0)
-        count = 1
+        flash_duration_ms = p.get("flash_duration_ms", 200)
+        intensity = int(((100 - self.controls.get_intensity_percent()) / 100.0) * 1023)
+        delay_s = p.get("flash_delay_s", 0)
         color = self.controls.get_selected_color()
-        
-        self.hardware.configure_flash_sequence(color, int(flash_s * 1000), intensity, frequency, ambiance, count)
+
+        self.hardware.configure_flash_sequence(color, flash_duration_ms, intensity, delay_s)
 
     def _calib(self): (CalibrationDialog(self.camera_thread.camera, self).exec() if self.camera_thread else None)
     def return_to_home(self): self.stop_camera(); self.w=WelcomeScreen(); self.w.patient_selected.connect(lambda p:[self.w.close(), MainWindow(p).show()]); self.w.show(); self.close()
     def _show_about(self): QMessageBox.about(self, "Infos", "PLR V3.28")
+    def _log_serial_tx(self, msg: str):
+        ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        self.serial_console.append(f'<span style="color:#ff9800;">[{ts}] TX → {msg}</span>')
+        self.serial_console.verticalScrollBar().setValue(self.serial_console.verticalScrollBar().maximum())
+
+    def _log_serial_rx(self, msg: str):
+        ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        self.serial_console.append(f'<span style="color:#4caf50;">[{ts}] RX ← {msg}</span>')
+        self.serial_console.verticalScrollBar().setValue(self.serial_console.verticalScrollBar().maximum())
+
+    def _log_serial_raw(self, msg: str):
+        ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        self.serial_console.append(f'<span style="color:#888888;">[{ts}] RAW {msg}</span>')
+        self.serial_console.verticalScrollBar().setValue(self.serial_console.verticalScrollBar().maximum())
+
+    def _send_manual_serial(self):
+        """Envoie une commande saisie manuellement dans la console série."""
+        cmd = self.txt_serial_cmd.text().strip()
+        if not cmd:
+            return
+        if not self.hardware.is_connected or not self.hardware.worker:
+            ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            self.serial_console.append(f'<span style="color:#f44336;">[{ts}] ERREUR : Non connecté</span>')
+            return
+        # Envoyer directement (bypass la queue pour le debug)
+        self.hardware.worker.send(cmd)
+        self.txt_serial_cmd.clear()
+
+    def _toggle_serial_console(self):
+        visible = self.serial_console.isVisible()
+        self.serial_console.setVisible(not visible)
+        self.chk_serial_visible.setText(self.tr("Afficher") if visible else self.tr("Masquer"))
+
     def stop_camera(self): (self.camera_thread.stop() if self.camera_thread else None)
     def closeEvent(self, e):
         try:
