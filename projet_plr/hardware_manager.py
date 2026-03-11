@@ -67,10 +67,13 @@ class HardwareManager(QObject):
         for p in ports:
             if "USB" in p.description.upper():
                 selected_port = p.device
+                logger.info(f"Port USB détecté : {p.device} ({p.description})")
                 break
 
         if selected_port is None:
-            selected_port = ports[0].device
+            logger.warning("Aucun port USB détecté — le microcontrôleur n'est pas branché.")
+            self.connection_status_changed.emit(False)
+            return False
 
         self.current_port = selected_port
         logger.info(f"Port sélectionné : {selected_port}")
@@ -106,9 +109,8 @@ class HardwareManager(QObject):
             return False
 
     def _on_port_ready(self):
-        """Appelé quand le port série est ouvert et les buffers vidés.
-        On attend que le µC finisse son propre boot avant d'envoyer des commandes."""
-        logger.info("Port série prêt — écoute passive uniquement (aucun envoi).")
+        """Appelé quand le port série est ouvert et les buffers vidés."""
+        logger.info("Port série prêt — connexion établie.")
         self.is_connected = True
         self.connection_status_changed.emit(True)
 

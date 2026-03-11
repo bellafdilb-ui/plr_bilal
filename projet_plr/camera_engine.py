@@ -1,7 +1,7 @@
 """
 camera_engine.py
 ================
-Moteur de capture ROBUSTE V4.1 (Fix: Crash Attribute Error 'csv_file').
+Moteur de capture ROBUSTE V5.0 (Support caméra USB3 Vision via IC4 + fallback OpenCV).
 """
 
 import cv2
@@ -13,6 +13,24 @@ from typing import Optional, Tuple, Dict, Any
 from settings_dialog import ConfigManager
 
 logger = logging.getLogger(__name__)
+
+# --- Backend IC4 (The Imaging Source USB3 Vision) ---
+_IC4_AVAILABLE = False
+try:
+    # S'assurer que le GenTL path est défini (nécessaire si lancé depuis un shell sans héritage)
+    _gentl_path = os.environ.get("GENICAM_GENTL64_PATH", "")
+    _tis_base = r"C:\Program Files\The Imaging Source Europe GmbH"
+    if os.path.isdir(_tis_base):
+        for _d in os.listdir(_tis_base):
+            _cti_dir = os.path.join(_tis_base, _d, "bin")
+            if os.path.isdir(_cti_dir) and _cti_dir not in _gentl_path:
+                _gentl_path = (_gentl_path + ";" + _cti_dir) if _gentl_path else _cti_dir
+        os.environ["GENICAM_GENTL64_PATH"] = _gentl_path
+
+    import imagingcontrol4 as ic4
+    _IC4_AVAILABLE = True
+except ImportError:
+    pass
 
 class CameraEngine:
     """
@@ -28,49 +46,85 @@ class CameraEngine:
         self.config_manager = ConfigManager()
         self.fps = 0.0
         self.last_time = time.time()
-        
+
+        # Backend IC4 (The Imaging Source USB3 Vision)
+        self._use_ic4 = False
+        self._ic4_grabber = None
+        self._ic4_sink = None
+
         # Params Détection
         self.threshold_val = 50
         self.blur_val = 5
         self.display_mode = 'normal'
         self.mm_per_pixel = 0.05
-        
+
         # Params ROI
         self.roi_w = 400
         self.roi_h = 400
         self.roi_off_x = 0
         self.roi_off_y = 0
-        
-        # --- INITIALISATION CRITIQUE (C'est ce qui manquait) ---
+
+        # --- INITIALISATION CRITIQUE ---
         self.csv_file = None
         self.video_writer = None
         self.recording = False
         self.start_time = 0.0
-        self.last_valid_diameter = 0.0 # Pour la continuité lors de la Black Frame
-        self.start_time = 0.0
-        self.record_skip = 1       # 1 = 30fps, 2 = 15fps (une frame sur deux)
+        self.last_valid_diameter = 0.0
+        self.record_skip = 1
         self._record_counter = 0
+        self._frame_width = 640
+        self._frame_height = 480
         # -------------------------------------------------------
-        
+
         self.open_camera()
         self.load_config()
 
     def open_camera(self):
-        """Tente d'ouvrir la caméra avec différents backends (DSHOW, MSMF, ANY)."""
+        """Tente d'ouvrir la caméra : IC4 (USB3 Vision) puis fallback OpenCV."""
         print(f"[CAMERA] Ouverture index {self.camera_index}...")
 
+        # --- 1. Tentative IC4 (The Imaging Source USB3 Vision) ---
+        if _IC4_AVAILABLE:
+            try:
+                ic4.Library.init()
+                devs = ic4.DeviceEnum.devices()
+                if len(devs) > 0:
+                    dev = devs[min(self.camera_index, len(devs) - 1)]
+                    self._ic4_grabber = ic4.Grabber()
+                    self._ic4_grabber.device_open(dev)
+                    self._ic4_sink = ic4.SnapSink()
+                    self._ic4_grabber.stream_setup(self._ic4_sink)
+
+                    m = self._ic4_grabber.device_property_map
+                    self._frame_width = m.get_value_int(ic4.PropId.WIDTH)
+                    self._frame_height = m.get_value_int(ic4.PropId.HEIGHT)
+                    try:
+                        rf = m.get_value_float(ic4.PropId.ACQUISITION_FRAME_RATE)
+                    except Exception:
+                        rf = 15.0
+
+                    self._use_ic4 = True
+                    print(f"[CAMERA] IC4 : {dev.model_name} ({dev.serial})")
+                    print(f"[CAMERA] Resolution : {self._frame_width}x{self._frame_height} @ {rf:.0f}fps")
+                    return
+                else:
+                    print("[CAMERA] IC4 : aucune camera USB3 Vision detectee.")
+            except Exception as e:
+                print(f"[CAMERA] IC4 : echec ({e})")
+
+        # --- 2. Fallback OpenCV (webcams UVC classiques) ---
         backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
         backend_names = ["DSHOW", "MSMF", "ANY"]
 
         for backend, name in zip(backends, backend_names):
             self.cap = cv2.VideoCapture(self.camera_index, backend)
             if self.cap.isOpened():
-                print(f"[CAMERA] ✅ Connecté via {name}")
+                print(f"[CAMERA] OpenCV : connecte via {name}")
                 break
-            print(f"[CAMERA] ⚠️ Echec {name}...")
+            print(f"[CAMERA] OpenCV : echec {name}...")
 
-        if not self.cap.isOpened():
-            print(f"[CAMERA] ❌ ERREUR FATALE : Aucune caméra trouvée.")
+        if not self.cap or not self.cap.isOpened():
+            print(f"[CAMERA] ERREUR FATALE : Aucune camera trouvee.")
             return
 
         try:
@@ -78,7 +132,6 @@ class CameraEngine:
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, cam_conf.get("width", 640))
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cam_conf.get("height", 480))
 
-            # FPS cible : doit être défini AU DÉMARRAGE (DSHOW ne supporte pas le changement à chaud)
             target_fps = cam_conf.get("target_fps", 0)
             if target_fps > 0:
                 self.cap.set(cv2.CAP_PROP_FPS, target_fps)
@@ -88,10 +141,10 @@ class CameraEngine:
                 self.cap.set(cv2.CAP_PROP_EXPOSURE, cam_conf.get("exposure", -5))
             except: pass
 
-            rw = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-            rh = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            self._frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            self._frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             rf = self.cap.get(cv2.CAP_PROP_FPS)
-            print(f"[CAMERA] Résolution : {int(rw)}x{int(rh)} @ {rf:.0f}fps")
+            print(f"[CAMERA] Resolution : {self._frame_width}x{self._frame_height} @ {rf:.0f}fps")
         except Exception as e:
             print(f"[CAMERA] Erreur config : {e}")
 
@@ -108,11 +161,23 @@ class CameraEngine:
     def release(self):
         """Libère les ressources (caméra et fichier CSV)."""
         self.stop_recording()
+        if self._use_ic4:
+            try:
+                if self._ic4_grabber:
+                    self._ic4_grabber.stream_stop()
+                    self._ic4_grabber.device_close()
+            except Exception:
+                pass
+            self._ic4_grabber = None
+            self._ic4_sink = None
+            self._use_ic4 = False
         if self.cap:
             self.cap.release()
 
     def is_ready(self) -> bool:
         """Vérifie si la caméra est ouverte et prête."""
+        if self._use_ic4:
+            return self._ic4_grabber is not None and self._ic4_sink is not None
         return self.cap is not None and self.cap.isOpened()
 
     def set_threshold(self, val: int):
@@ -141,8 +206,8 @@ class CameraEngine:
             self.csv_file.write("timestamp_s,diameter_mm,quality_score,brightness\n")
 
             # 2. VIDÉO AVI
-            w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            w = self._frame_width
+            h = self._frame_height
             if w > 0 and h > 0:
                 fourcc = cv2.VideoWriter_fourcc(*'MJPG')
                 self.video_writer = cv2.VideoWriter(base_path + ".avi", fourcc, 30.0, (w, h))
@@ -204,10 +269,17 @@ class CameraEngine:
                 - Un dictionnaire contenant les données de la pupille (ou None).
         """
         if not self.is_ready(): return None, None
-        
+
         try:
-            ret, raw_frame = self.cap.read()
-            if not ret: return None, None
+            if self._use_ic4:
+                frame_buf = self._ic4_sink.snap_single(1000)
+                if frame_buf is None: return None, None
+                raw_frame = frame_buf.numpy_copy()
+                if raw_frame.ndim == 3 and raw_frame.shape[2] == 1:
+                    raw_frame = raw_frame[:, :, 0]  # (H, W, 1) → (H, W) mono
+            else:
+                ret, raw_frame = self.cap.read()
+                if not ret: return None, None
         except Exception:
             return None, None
         
