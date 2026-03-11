@@ -1,0 +1,72 @@
+==============================================================================
+  PREREQUIS D'INSTALLATION - Projet PLR (Pupillary Light Reflex)
+==============================================================================
+
+1. PYTHON
+   - Version requise : Python 3.10+
+   - Telecharger : https://www.python.org/downloads/
+
+2. DEPENDANCES PYTHON
+   Depuis le dossier projet_plr, executer :
+
+      pip install -r requirements.txt
+
+3. CAMERA - The Imaging Source (DMM 32UVR024-ML / USB3 Vision)
+   La camera industrielle utilise le protocole USB3 Vision (pas UVC).
+   Elle necessite des drivers specifiques pour fonctionner.
+
+   a) Driver GenTL USB3 Vision (OBLIGATOIRE)
+      - Nom : IC4 GenTL Driver for USB3Vision Devices
+      - Telecharger : https://www.theimagingsource.com/en-us/support/download/
+      - Chercher "ic4-gentl-driver-usb3vision" dans la section drivers
+      - Installer EN TANT QU'ADMINISTRATEUR
+      - Apres installation, verifier que le dossier existe :
+        C:\Program Files\The Imaging Source Europe GmbH\IC4 GenTL Driver for USB3Vision Devices 1.5\bin\
+
+   b) SDK Python IC4 (OBLIGATOIRE)
+      pip install imagingcontrol4
+
+   c) IC Capture 4 (OPTIONNEL, pour tester la camera independamment)
+      - Telecharger sur le meme site The Imaging Source
+      - Permet de verifier que la camera fonctionne avant de lancer le logiciel
+
+   d) Verification dans Windows :
+      - Gestionnaire de peripheriques > Cameras
+      - La camera doit apparaitre comme "USB3 Vision Device" (pas "Unknown")
+      - Si status "Unknown" : reinstaller le driver GenTL USB3 Vision
+
+   e) Variable d'environnement (normalement automatique) :
+      Le logiciel configure automatiquement GENICAM_GENTL64_PATH au demarrage.
+      Si probleme, verifier que la variable systeme contient :
+      C:\Program Files\The Imaging Source Europe GmbH\IC4 GenTL Driver for USB3Vision Devices 1.5\bin
+
+   IMPORTANT : Le logiciel est retrocompatible. Sans le SDK IC4 ou sans camera
+   The Imaging Source, il utilise automatiquement OpenCV (webcams UVC classiques).
+
+4. MICROCONTROLEUR (Port Serie)
+   - Connexion USB avec driver FTDI (VID:PID 0403:6001)
+   - Le driver FTDI s'installe generalement automatiquement sur Windows
+   - Si pas detecte : https://ftdichip.com/drivers/vcp-drivers/
+   - Baudrate : 115200
+   - Le port COM doit apparaitre comme "USB Serial Port (COMx)"
+     dans le Gestionnaire de peripheriques > Ports (COM et LPT)
+
+5. CONFIGURATION (config/default_config.json)
+   Parametres a ajuster selon le poste :
+   - camera.index : index de la camera (generalement 0)
+   - detection.canny_threshold1 : seuil de detection (ajuster via l'interface)
+   - detection.gaussian_blur : flou gaussien (ajuster via l'interface)
+   Ces parametres sont sauvegardes automatiquement via l'interface Reglages.
+
+==============================================================================
+  LANCEMENT
+==============================================================================
+   python main_application.py
+
+==============================================================================
+  RESUME DES COMMANDES D'INSTALLATION
+==============================================================================
+   pip install -r requirements.txt
+   pip install imagingcontrol4
+   pip install pyserial
+   # + Installer le driver GenTL USB3 Vision depuis le site The Imaging Source
