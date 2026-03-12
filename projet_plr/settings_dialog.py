@@ -28,7 +28,7 @@ class ConfigManager:
                 "general": {"language": "fr", "enable_beep": True},
                 "camera": {"index": 0, "width": 640, "height": 480}, 
                 "detection": {"canny_threshold1": 50, "gaussian_blur": 5, "roi_width":400, "roi_height":400},
-                "protocol": {"baseline_duration": 2.0, "flash_duration_ms": 200, "response_duration": 5.0, "flash_count": 1, "default_color": "WHITE"},
+                "protocol": {"flash_delay_s": 2, "flash_duration_ms": 200, "response_duration": 5.0, "flash_count": 1, "default_color": "WHITE"},
                 "recording": {"save_path": "recordings"}
             }
             self.save(default_conf)
@@ -84,7 +84,7 @@ class SettingsDialog(QDialog):
         w = QWidget(); l = QFormLayout(w)
         g = QGroupBox(self.tr("Chronologie (Secondes)"))
         fl = QFormLayout()
-        self.spin_baseline = QDoubleSpinBox(); self.spin_baseline.setSuffix(" s"); self.spin_baseline.setRange(0.5, 30.0); self.spin_baseline.setSingleStep(0.5)
+        self.spin_flash_delay = QSpinBox(); self.spin_flash_delay.setSuffix(" s"); self.spin_flash_delay.setRange(0, 5); self.spin_flash_delay.setSingleStep(1)
         self.spin_flash_s = QDoubleSpinBox(); self.spin_flash_s.setSuffix(" s"); self.spin_flash_s.setRange(0.01, 10.0); self.spin_flash_s.setSingleStep(0.1); self.spin_flash_s.setDecimals(2)
         self.spin_total_time = QDoubleSpinBox(); self.spin_total_time.setSuffix(" s"); self.spin_total_time.setRange(1.0, 120.0); self.spin_total_time.setSingleStep(1.0)
         
@@ -99,7 +99,7 @@ class SettingsDialog(QDialog):
         self.spin_frequency = QDoubleSpinBox(); self.spin_frequency.setRange(0.01, 60.0); self.spin_frequency.setSingleStep(0.1); self.spin_frequency.setSuffix(" Hz")
         self.spin_ambiance = QSpinBox(); self.spin_ambiance.setRange(0, 65536); self.spin_ambiance.setSingleStep(100); self.spin_ambiance.setSuffix(" u")
 
-        fl.addRow(self.tr("1. Baseline:"), self.spin_baseline)
+        fl.addRow(self.tr("1. Retard flash:"), self.spin_flash_delay)
         fl.addRow(self.tr("2. Flash:"), self.spin_flash_s)
         fl.addRow(self.tr("3. Durée TOTALE:"), self.spin_total_time)
         fl.addRow(self.tr("Couleur par défaut:"), self.combo_def_color)
@@ -154,8 +154,8 @@ class SettingsDialog(QDialog):
         lang = gen.get("language", "fr"); idx = 1 if lang == "en" else 0; self.combo_lang.setCurrentIndex(idx)
         self.chk_beep.setChecked(gen.get("enable_beep", True))
         p = c.get("protocol", {})
-        base = p.get("baseline_duration", 2.0); flash_s = p.get("flash_duration_ms", 200) / 1000.0; resp = p.get("response_duration", 5.0)
-        self.spin_baseline.setValue(base); self.spin_flash_s.setValue(flash_s); self.spin_total_time.setValue(base + flash_s + resp)
+        delay = p.get("flash_delay_s", 2); flash_s = p.get("flash_duration_ms", 200) / 1000.0; resp = p.get("response_duration", 5.0)
+        self.spin_flash_delay.setValue(int(delay)); self.spin_flash_s.setValue(flash_s); self.spin_total_time.setValue(delay + flash_s + resp)
         
         # Charge la couleur par défaut
         def_col = p.get("default_color", "BLUE")
@@ -175,15 +175,15 @@ class SettingsDialog(QDialog):
         self.inp_clin_name.setText(i.get('name','')); self.inp_clin_addr.setText(i.get('address','')); self.inp_clin_doc.setText(i.get('doctor_name','')); self.inp_clin_phone.setText(i.get('phone','')); self.inp_clin_logo.setText(i.get('logo_path',''))
 
     def get_settings(self):
-        base = self.spin_baseline.value(); flash_s = self.spin_flash_s.value(); total = self.spin_total_time.value()
-        if total <= (base + flash_s): total = base + flash_s + 2.0; self.spin_total_time.setValue(total)
-        response = total - base - flash_s
+        delay = self.spin_flash_delay.value(); flash_s = self.spin_flash_s.value(); total = self.spin_total_time.value()
+        if total <= (delay + flash_s): total = delay + flash_s + 2.0; self.spin_total_time.setValue(total)
+        response = total - delay - flash_s
         lang_code = self.combo_lang.currentData()
         
         return {
             "general": {"language": lang_code, "enable_beep": self.chk_beep.isChecked()},
             "protocol": {
-                "baseline_duration": base, 
+                "flash_delay_s": delay,
                 "flash_duration_ms": int(flash_s * 1000), 
                 "response_duration": round(response, 2), 
                 "flash_count": 1,

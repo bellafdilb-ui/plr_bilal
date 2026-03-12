@@ -36,6 +36,8 @@ class HardwareManager(QObject):
     def __init__(self):
         super().__init__()
         self.is_connected = False
+        self._handshake_done = False  # True quand "TEST OK" reçu du µC
+        self._exam_in_progress = False  # True entre D/F et A (examen µC en cours)
         self.worker = None
         self.command_queue = []
         self.current_port = None
@@ -45,6 +47,10 @@ class HardwareManager(QObject):
         self.timeout_timer = QTimer()
         self.timeout_timer.setSingleShot(True)
         self.timeout_timer.timeout.connect(self._on_timeout)
+        # Timer handshake : si "TEST OK" n'arrive pas dans les 10s
+        self._handshake_timer = QTimer()
+        self._handshake_timer.setSingleShot(True)
+        self._handshake_timer.timeout.connect(self._on_handshake_timeout)
 
     # ─── Formatage des commandes PLR ────────────────────────────────
     @staticmethod
@@ -109,12 +115,29 @@ class HardwareManager(QObject):
             return False
 
     def _on_port_ready(self):
-        """Appelé quand le port série est ouvert et les buffers vidés."""
-        logger.info("Port série prêt — connexion établie.")
-        self.is_connected = True
-        self.connection_status_changed.emit(True)
+        """Appelé quand le port série est ouvert et les buffers vidés.
+        On attend "TEST OK" ou une réponse à "!version=0;" pour valider."""
+        logger.info("Port série ouvert — en attente du µC...")
+        self._handshake_done = False
+        self._handshake_timer.start(10000)  # Timeout 10s
+        # Demander la version pour détecter un µC déjà allumé (pas de "TEST OK" au boot)
+        QTimer.singleShot(500, self._send_handshake_probe)
+
+    def _send_handshake_probe(self):
+        """Envoie !version=0; pour détecter un µC déjà allumé."""
+        if not self._handshake_done and self.worker and self.worker.running:
+            logger.info("Envoi sonde handshake : !version=0;")
+            self.worker.send(self._fmt("version=0"))
+
+    def _on_handshake_timeout(self):
+        """Le µC n'a pas répondu dans les 10s."""
+        if not self._handshake_done:
+            logger.warning("Timeout handshake : aucune reponse du µC — non pret ou eteint.")
+            self.is_connected = False
+            self.connection_status_changed.emit(False)
 
     def disconnect_device(self):
+        self._handshake_timer.stop()
         if self.is_connected:
             self.stop_flash()
             time.sleep(0.1)
@@ -124,6 +147,7 @@ class HardwareManager(QObject):
             self.worker = None
 
         self.is_connected = False
+        self._handshake_done = False
         self.connection_status_changed.emit(False)
 
     # ─── Commandes de configuration (envoyées AVANT l'examen) ──────
@@ -183,13 +207,15 @@ class HardwareManager(QObject):
     # ─── Commandes d'examen ───────────────────────────────────────
     def start_exam(self):
         """
-        Envoie la commande de départ d'examen au µC.
-        Le µC déclenche alors le flash selon la configuration pré-envoyée.
-        Les signaux retour (D, F, f, A) informent le PC de la progression.
+        Envoie la commande de départ d'examen au µC via la file d'attente.
+        Ne fait rien si un examen est deja en cours sur le µC.
         """
+        if self._exam_in_progress:
+            logger.info(">>> Examen deja en cours sur le µC — !depart non envoye <<<")
+            return
         if self.is_connected and self.worker:
             logger.info(">>> HARDWARE : DÉPART EXAMEN (logiciel) <<<")
-            self.worker.send(self._fmt("depart=1234"))
+            self.enqueue_command(self._fmt("depart=1234"))
 
     def stop_flash(self):
         """Arrête immédiatement le flash et vide la file d'attente."""
@@ -228,6 +254,30 @@ class HardwareManager(QObject):
         logger.info(f"RX: {data}")
         self.serial_rx.emit(data)
 
+        # Handshake initial : le µC envoie "TEST OK" au boot
+        if data == "TEST OK":
+            self._handshake_timer.stop()
+            self._handshake_done = True
+            self.is_connected = True
+            logger.info("Handshake reussi : 'TEST OK' recu du µC.")
+            self.connection_status_changed.emit(True)
+            return
+
+        # Réponse "version" avant handshake → µC déjà allumé, valider le handshake
+        if not self._handshake_done and "version" in data.lower():
+            self._handshake_timer.stop()
+            self._handshake_done = True
+            self.is_connected = True
+            logger.info(f"Handshake reussi via reponse version : '{data}'")
+            self.connection_status_changed.emit(True)
+            self.firmware_received.emit(data)
+            return
+
+        # Ignorer les messages avant le handshake
+        if not self._handshake_done:
+            logger.debug(f"Message ignore (handshake non fait) : {data}")
+            return
+
         if data == "OK":
             logger.debug("ACK reçu du dispositif")
             # OK reçu → envoyer la commande suivante de la file
@@ -239,14 +289,12 @@ class HardwareManager(QObject):
 
         # Signaux d'examen retournés par le µC
         if data == "D":
-            # Le µC a reçu l'ordre de départ et un retard est configuré.
-            # Le flash n'a PAS encore été déclenché.
+            self._exam_in_progress = True
             logger.info("Signal µC : Départ examen AVEC retard (flash imminent)")
             self.exam_started.emit()
 
         elif data == "F":
-            # Le µC a déclenché le flash IMMÉDIATEMENT (pas de retard).
-            # Ce signal indique aussi que la gâchette a été pressée.
+            self._exam_in_progress = True
             logger.info("Signal µC : Flash déclenché (sans retard / gâchette)")
             self.flash_fired.emit()
 
@@ -257,7 +305,7 @@ class HardwareManager(QObject):
             self.flash_fired.emit()
 
         elif data == "A":
-            # Le flash est terminé. On peut rallumer l'IR pour la caméra.
+            self._exam_in_progress = False
             logger.info("Signal µC : Fin du flash")
             self.flash_ended.emit()
             self.set_ir(True)

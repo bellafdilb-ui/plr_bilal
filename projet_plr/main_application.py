@@ -179,7 +179,8 @@ class ControlPanel(QWidget):
         gi=QGroupBox(self.tr("Intensité Flash")); li=QVBoxLayout()
         self.lbl_intensity=QLabel("100 %"); self.lbl_intensity.setAlignment(Qt.AlignCenter); self.lbl_intensity.setStyleSheet("font-weight:bold;")
         self.slider_intensity=QSlider(Qt.Horizontal); self.slider_intensity.setRange(0,100); self.slider_intensity.setValue(100)
-        self.slider_intensity.valueChanged.connect(self._on_intensity_change)
+        self.slider_intensity.valueChanged.connect(self._on_intensity_label_update)
+        self.slider_intensity.sliderReleased.connect(self._on_intensity_committed)
         li.addWidget(self.lbl_intensity); li.addWidget(self.slider_intensity); gi.setLayout(li); l.addWidget(gi)
 
         # REGLAGES
@@ -218,7 +219,8 @@ class ControlPanel(QWidget):
         elif "Mosa" in t: mode="mosaic"
         self.display_mode_changed.emit(mode)
         
-    def _on_intensity_change(self, v): self.lbl_intensity.setText(f"{v} %"); self.intensity_changed.emit(v)
+    def _on_intensity_label_update(self, v): self.lbl_intensity.setText(f"{v} %")
+    def _on_intensity_committed(self): self.intensity_changed.emit(self.slider_intensity.value())
     def get_intensity_percent(self): return self.slider_intensity.value()
     def set_intensity_percent(self, v): self.slider_intensity.setValue(v)
 
@@ -273,8 +275,10 @@ class MainWindow(QMainWindow):
         self.hw_reconnect_timer.timeout.connect(self.try_auto_reconnect_hw)
 
         self.is_camera_ready = False
-        self.is_test_running = False 
+        self.is_test_running = False
         self.is_hardware_ready = False
+        self._hw_warning_box = None   # Popup HW non connecte (non-modale, fermable)
+        self._hw_warning_shown = False # True apres que l'utilisateur a ferme la popup
         
         self.current_laterality = 'OD'
         self.current_color = 'BLUE'
@@ -345,13 +349,13 @@ class MainWindow(QMainWindow):
         self.controls.fps_changed.connect(self.on_fps_changed)
 
         p = self.conf.config.get("protocol", {})
-        self.controls.set_intensity_percent(int((p.get("flash_intensity", 65536)/65536.0)*100))
-        self.controls.intensity_changed.connect(self.update_hardware_params)
+        self.controls.set_intensity_percent(p.get("flash_intensity_percent", 100))
+        self.controls.intensity_changed.connect(self._send_intensity)
 
         self.controls.test_requested.connect(self.start_test)
         self.controls.reset_camera_requested.connect(self.reset_camera)
         self.controls.reset_hardware_requested.connect(self.reset_hardware)
-        self.controls.color_changed.connect(self.update_hardware_params)
+        self.controls.color_changed.connect(self._send_color)
 
         ctrl_scroll = QScrollArea()
         ctrl_scroll.setWidget(self.controls)
@@ -430,6 +434,8 @@ class MainWindow(QMainWindow):
 
         bl.addWidget(self.grp_actions); bl.addWidget(self.grp_com); bl.addWidget(self.grp_hist); bl.addWidget(self.grp_serial)
         self.right_split = QSplitter(Qt.Vertical)
+        self.right_split.setChildrenCollapsible(False)
+        bottom_w.setMinimumHeight(200)
         self.right_split.addWidget(self.graph_widget); self.right_split.addWidget(bottom_w)
         QTimer.singleShot(0, self._restore_splitter)
 
@@ -483,6 +489,9 @@ class MainWindow(QMainWindow):
         if not self.engine or not self.is_camera_ready:
             QMessageBox.critical(self, self.tr("Erreur"), self.tr("Impossible de lancer l'examen : La caméra n'est pas connectée !"))
             return
+        if not self.is_hardware_ready:
+            self._show_hw_warning()
+            return
         if self.temp_result_meta is not None:
              if QMessageBox.question(self, self.tr("Attention"), self.tr("Un examen est en cours.\nÉcraser ?"), QMessageBox.Yes|QMessageBox.No, QMessageBox.No) == QMessageBox.No: return
 
@@ -494,9 +503,9 @@ class MainWindow(QMainWindow):
         self.selected_historical_exam = None
         
         p = self.conf.config.get("protocol", {})
-        base = p.get("baseline_duration", 2.0); flash_s = p.get("flash_duration_ms", 200) / 1000.0; resp = p.get("response_duration", 5.0); count = 1
-        self.controls.pb.setRange(0, int((base + flash_s + resp)*count*10))
-        self.engine.configure(baseline_duration=base, flash_count=count, flash_duration_ms=int(flash_s*1000), response_duration=resp)
+        delay = p.get("flash_delay_s", 2); flash_s = p.get("flash_duration_ms", 200) / 1000.0; resp = p.get("response_duration", 5.0); count = 1
+        self.controls.pb.setRange(0, int((delay + flash_s + resp)*count*10))
+        self.engine.configure(flash_delay=delay, flash_count=count, flash_duration_ms=int(flash_s*1000), response_duration=resp)
         self.current_laterality = self.controls.get_selected_eye()
         self.current_color = self.controls.get_selected_color()
         
@@ -505,44 +514,57 @@ class MainWindow(QMainWindow):
         # Sécurité : Si le nom est vide ou ne contient que des underscores (ex: "!!!")
         if not safe_name.replace("_", ""):
             safe_name = f"Patient_{self.patient.get('id', 'Unknown')}"
-        # Envoyer la configuration flash au µC juste avant le départ
-        self.update_hardware_params()
+        # Renvoyer tous les paramètres au µC avant le départ
+        self._send_all_hardware_params()
+        self._trigger_initiated = False  # Examen logiciel → envoyer !depart au µC
         self.engine.start_test(f"{safe_name}_{self.current_laterality}_{self.current_color}")
         self.controls.setEnabled(False)
 
     def on_hardware_flash_fired(self):
-        """Signal F/f reçu du µC : le flash a été déclenché."""
+        """Signal F/f reçu du µC : le flash a été déclenché.
+        Notifie le moteur du timestamp précis du flash."""
         logging.info("Signal µC reçu : Flash déclenché")
         self.lbl_flash_indicator.setVisible(True)
 
         if self.is_test_running and self.engine:
-            # Test en cours → notifier le moteur du flash
             self.engine.notify_flash_fired()
         elif not self.is_test_running and self.is_camera_ready and self.engine:
-            # Gâchette physique pressée sans avoir lancé l'examen → démarrage auto
-            logging.info("Gâchette physique détectée → Démarrage automatique")
+            # F reçu sans D préalable (gâchette sans retard) → démarrage auto
+            logging.info("Flash détecté (sans D) → Démarrage automatique")
             self._start_test_from_trigger()
+            self.engine.notify_flash_fired()
 
     def on_hardware_flash_ended(self):
         """Signal A reçu du µC : le flash est terminé."""
         self.lbl_flash_indicator.setVisible(False)
 
     def on_hardware_exam_started(self):
-        """Signal D reçu du µC : examen démarré avec retard (flash imminent)."""
-        logging.info("Signal µC : Examen démarré avec retard")
+        """Signal D reçu du µC : examen démarré avec retard (flash imminent).
+        Si aucun examen n'est en cours, la gâchette a été pressée → démarrer l'enregistrement."""
+        logging.info("Signal µC : Examen démarré (D reçu)")
         if self.is_test_running:
             self.status.showMessage(self.tr("Flash imminent..."))
+        elif self.is_camera_ready and self.engine:
+            logging.info("Signal D reçu sans examen en cours → Gâchette détectée, démarrage enregistrement")
+            self._start_test_from_trigger()
 
-    def on_baseline_complete(self):
-        """La baseline est terminée → envoyer la commande de départ au µC."""
-        logging.info("Baseline terminée → Envoi commande départ au µC")
+    def on_delay_complete(self):
+        """Enregistrement demarre → envoyer la commande de depart au µC.
+        Uniquement si l'examen a ete lance par le bouton logiciel (pas par la gachette)."""
+        if getattr(self, '_trigger_initiated', False):
+            logging.info("Examen déclenché par gâchette → pas d'envoi !depart au µC")
+            return
+        logging.info("Envoi commande depart au µC (retard gere par le µC)")
         self.hardware.start_exam()
 
     def _start_test_from_trigger(self):
-        """Démarre un test déclenché par la gâchette physique (baseline minimale)."""
+        """Démarre un test déclenché par la gâchette physique.
+        Le µC gère le flash → ne PAS envoyer !depart.
+        L'enregistrement commence immédiatement, le flash (F/f) sera notifié séparément."""
         if self.is_test_running:
             return
 
+        self._trigger_initiated = True  # Gâchette → ne pas envoyer !depart au µC
         if self.conf.get("general", "enable_beep", True):
             QApplication.beep()
         self.real_flash_timestamp = None
@@ -552,11 +574,11 @@ class MainWindow(QMainWindow):
         self.selected_historical_exam = None
 
         p = self.conf.config.get("protocol", {})
+        delay = p.get("flash_delay_s", 2)
         flash_s = p.get("flash_duration_ms", 200) / 1000.0
         resp = p.get("response_duration", 5.0)
-        # Baseline minimale car le flash est déjà parti
-        self.controls.pb.setRange(0, int((0.5 + flash_s + resp) * 10))
-        self.engine.configure(baseline_duration=0.5, flash_count=1,
+        self.controls.pb.setRange(0, int((delay + flash_s + resp) * 10))
+        self.engine.configure(flash_delay=delay, flash_count=1,
                               flash_duration_ms=int(flash_s * 1000), response_duration=resp)
         self.current_laterality = self.controls.get_selected_eye()
         self.current_color = self.controls.get_selected_color()
@@ -565,8 +587,7 @@ class MainWindow(QMainWindow):
         if not safe_name.replace("_", ""):
             safe_name = f"Patient_{self.patient.get('id', 'Unknown')}"
         self.engine.start_test(f"{safe_name}_{self.current_laterality}_{self.current_color}")
-        # Notifier immédiatement le flash car il est déjà déclenché
-        self.engine.notify_flash_fired()
+        # Ne PAS notifier le flash ici — attendre le vrai signal F/f du µC
         self.controls.setEnabled(False)
 
     def on_test_finished(self, meta):
@@ -757,16 +778,57 @@ class MainWindow(QMainWindow):
     def on_camera_started(self): self.is_camera_ready = True; self.set_camera_status(True); self.check_ready_state()
     def on_camera_error(self, err_msg): self.is_camera_ready = False; self.set_camera_status(False); self.check_ready_state(); self.status.showMessage(self.tr("⚠️ Erreur Caméra")); QMessageBox.critical(self, self.tr("Erreur Caméra"), self.tr("Problème détecté :\n\n{err}\n\n👉 Vérifiez le branchement USB.\n👉 Cliquez ensuite sur '🔄 Réinit. Caméra'.").format(err=err_msg))
     
+    def _close_hw_warning(self):
+        """Ferme la popup d'avertissement HW si elle est ouverte."""
+        if self._hw_warning_box is not None:
+            self._hw_warning_box.close()
+            self._hw_warning_box = None
+
+    def _show_hw_warning(self):
+        """Affiche une popup non-modale d'avertissement HW. Ne fait rien si deja visible."""
+        if self._hw_warning_box is not None and self._hw_warning_box.isVisible():
+            return
+        self._hw_warning_box = QMessageBox(QMessageBox.Warning,
+            self.tr("HW non connecte"),
+            self.tr("Le dispositif n'est pas detecte.\n\n"
+                     "Veuillez verifier que :\n"
+                     "  - Le dispositif est branche en USB\n"
+                     "  - Le dispositif est allume\n\n"
+                     "La recherche automatique est en cours..."),
+            QMessageBox.Ok, self)
+        self._hw_warning_box.setModal(False)
+        self._hw_warning_box.finished.connect(self._on_hw_warning_closed)
+        self._hw_warning_box.show()
+
+    def _on_hw_warning_closed(self):
+        """L'utilisateur a ferme la popup HW — ne plus la réafficher automatiquement."""
+        self._hw_warning_box = None
+        self._hw_warning_shown = True
+
     def on_hardware_status_changed(self, connected: bool):
         self.is_hardware_ready = connected
         self.set_hardware_status(connected)
         if connected:
+            self._close_hw_warning()
+            self._hw_warning_shown = False  # Reset pour la prochaine deconnexion
             self.status.showMessage(self.tr("Matériel connecté sur le port {}.").format(self.hardware.current_port))
             self.hw_reconnect_timer.stop()
+            # Envoyer tous les paramètres du protocole au µC
             self._send_initial_hardware_config()
+            # Confirmation auto-fermee apres 3s
+            box = QMessageBox(QMessageBox.Information,
+                self.tr("Connexion HW"),
+                self.tr("Le dispositif est connecte et communique correctement sur le port {}.").format(self.hardware.current_port),
+                QMessageBox.Ok, self)
+            box.setModal(False)
+            box.show()
+            QTimer.singleShot(3000, box.close)
         else:
             self.status.showMessage(self.tr("Matériel déconnecté. Recherche automatique..."))
             self.hw_reconnect_timer.start()
+            # Popup uniquement la premiere fois (pas a chaque tentative de reconnexion)
+            if not self._hw_warning_shown:
+                self._show_hw_warning()
         self.check_ready_state()
 
     def init_engine(self):
@@ -781,18 +843,19 @@ class MainWindow(QMainWindow):
         self.engine = PLRTestEngine(self.camera_thread.camera)
 
         # Connexion des signaux du moteur
-        self.engine.baseline_complete.connect(self.on_baseline_complete)
+        self.engine.delay_complete.connect(self.on_delay_complete)
         self.engine.test_finished.connect(self.on_test_finished)
         self.engine.progress_updated.connect(lambda e, p: [self.controls.pb.setValue(int(e*10)), self.controls.pb.setFormat(f"{p} : {e:.1f}s")])
         self.status.showMessage(self.tr("Prêt"))
 
     def on_fps_changed(self, fps: int):
-        """Change le FPS. Pour 15fps : diviseur seul. Pour les autres : mémorise + reset caméra."""
+        """Change le FPS. IC4 : changement a chaud. OpenCV : reset camera."""
         self.camera_thread.set_fps(fps)
-        if fps != 15:
-            # DSHOW ne supporte pas le changement de FPS à chaud → mémorisation + redémarrage
-            self.conf.config.setdefault("camera", {})["target_fps"] = fps
-            self.reset_camera()
+        if self.camera_thread.camera:
+            self.camera_thread.camera.set_fps_target(fps)
+            # OpenCV ne supporte pas le changement a chaud → reset necessaire
+            if not self.camera_thread.camera._use_ic4 and fps != 15:
+                self.reset_camera()
 
     def reset_camera(self): self.status.showMessage(self.tr("Reset...")); self.is_camera_ready = False; self.set_camera_status(False); self.check_ready_state(); self.stop_camera(); QTimer.singleShot(1000, self.start_camera)
     
@@ -1000,27 +1063,39 @@ class MainWindow(QMainWindow):
             d=s.get('detection',{}); self.camera_thread.camera.roi_w=int(d.get('roi_width',400)); self.camera_thread.camera.roi_h=int(d.get('roi_height',400)); self.camera_thread.camera.roi_off_x=int(d.get('roi_offset_x',0)); self.camera_thread.camera.roi_off_y=int(d.get('roi_offset_y',0)); self.camera_thread.set_threshold(int(d.get('canny_threshold1',50)))
         
         p = s.get("protocol", {})
-        raw = p.get("flash_intensity", 65536)
-        self.controls.set_intensity_percent(int((raw/65536.0)*100))
+        self.controls.set_intensity_percent(p.get("flash_intensity_percent", 100))
         
         # Mise à jour complète de la configuration hardware
-        self.update_hardware_params()
+        self._send_all_hardware_params()
 
     def _send_initial_hardware_config(self):
-        """Écoute passive à la connexion — aucune commande envoyée."""
-        pass
+        """Envoie la configuration par defaut au µC apres le handshake 'TEST OK'."""
+        self._send_all_hardware_params()
 
-    def update_hardware_params(self):
-        """Envoie la configuration complète au matériel (Couleur, Durée, Intensité...)."""
+    def _send_all_hardware_params(self):
+        """Envoie TOUS les parametres au µC (connexion initiale / depart examen)."""
         if not self.hardware.is_connected: return
-        
         p = self.conf.config.get("protocol", {})
-        flash_duration_ms = p.get("flash_duration_ms", 200)
-        intensity = int(((100 - self.controls.get_intensity_percent()) / 100.0) * 1023)
-        delay_s = p.get("flash_delay_s", 0)
         color = self.controls.get_selected_color()
+        flash_duration_ms = p.get("flash_duration_ms", 1000)
+        intensity_percent = self.controls.get_intensity_percent()
+        intensity_uc = int(((100 - intensity_percent) / 100.0) * 1023)
+        delay_s = p.get("flash_delay_s", 0)
+        self.hardware.configure_flash_sequence(color, flash_duration_ms, intensity_uc, delay_s)
 
-        self.hardware.configure_flash_sequence(color, flash_duration_ms, intensity, delay_s)
+    def _send_color(self):
+        """Envoie uniquement la couleur au µC."""
+        if not self.hardware.is_connected: return
+        cmd = self.hardware.set_flash_color(self.controls.get_selected_color())
+        self.hardware.enqueue_command(cmd)
+
+    def _send_intensity(self):
+        """Envoie uniquement l'intensite au µC."""
+        if not self.hardware.is_connected: return
+        intensity_percent = self.controls.get_intensity_percent()
+        intensity_uc = int(((100 - intensity_percent) / 100.0) * 1023)
+        cmd = self.hardware.set_flash_intensity(intensity_uc)
+        self.hardware.enqueue_command(cmd)
 
     def _calib(self): (CalibrationDialog(self.camera_thread.camera, self).exec() if self.camera_thread else None)
     def return_to_home(self): self.stop_camera(); self.w=WelcomeScreen(); self.w.patient_selected.connect(lambda p:[self.w.close(), MainWindow(p).show()]); self.w.show(); self.close()

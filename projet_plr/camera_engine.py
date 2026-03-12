@@ -87,15 +87,26 @@ class CameraEngine:
         if _IC4_AVAILABLE:
             try:
                 ic4.Library.init()
+            except Exception:
+                pass  # Deja initialise — OK
+            try:
                 devs = ic4.DeviceEnum.devices()
                 if len(devs) > 0:
                     dev = devs[min(self.camera_index, len(devs) - 1)]
                     self._ic4_grabber = ic4.Grabber()
                     self._ic4_grabber.device_open(dev)
+
+                    # Appliquer le FPS cible avant de demarrer le stream
+                    target_fps = self.config_manager.config.get("camera", {}).get("target_fps", 30)
+                    m = self._ic4_grabber.device_property_map
+                    try:
+                        m.set_value_float(ic4.PropId.ACQUISITION_FRAME_RATE, float(target_fps))
+                    except Exception as e:
+                        print(f"[CAMERA] IC4 : impossible de regler FPS a {target_fps} ({e})")
+
                     self._ic4_sink = ic4.SnapSink()
                     self._ic4_grabber.stream_setup(self._ic4_sink)
 
-                    m = self._ic4_grabber.device_property_map
                     self._frame_width = m.get_value_int(ic4.PropId.WIDTH)
                     self._frame_height = m.get_value_int(ic4.PropId.HEIGHT)
                     try:
@@ -171,6 +182,10 @@ class CameraEngine:
             self._ic4_grabber = None
             self._ic4_sink = None
             self._use_ic4 = False
+            try:
+                ic4.Library.exit()
+            except Exception:
+                pass
         if self.cap:
             self.cap.release()
 
@@ -193,8 +208,16 @@ class CameraEngine:
         self.display_mode = mode
 
     def set_fps_target(self, fps: int):
-        """Mémorise le FPS cible dans la config (sera appliqué au prochain open_camera)."""
+        """Change le FPS. IC4 : changement a chaud. OpenCV : memorise pour prochain open."""
         self.config_manager.config.setdefault("camera", {})["target_fps"] = fps
+        if self._use_ic4 and self._ic4_grabber:
+            try:
+                m = self._ic4_grabber.device_property_map
+                m.set_value_float(ic4.PropId.ACQUISITION_FRAME_RATE, float(fps))
+                rf = m.get_value_float(ic4.PropId.ACQUISITION_FRAME_RATE)
+                print(f"[CAMERA] IC4 FPS change a {rf:.0f}")
+            except Exception as e:
+                print(f"[CAMERA] IC4 : impossible de changer FPS a chaud ({e})")
 
     def start_recording(self, base_path: str):
         """Démarre l'enregistrement CSV + VIDÉO AVI."""

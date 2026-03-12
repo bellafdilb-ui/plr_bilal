@@ -4,12 +4,12 @@
         "enable_beep": true
     },
     "protocol": {
-        "baseline_duration": 1.0,
+        "flash_delay_s": 2,
         "flash_duration_ms": 1000,
-        "response_duration": 6.0,
+        "response_duration": 5.0,
         "flash_count": 1,
         "default_color": "WHITE",
-        "flash_intensity": 65536,
+        "flash_intensity": 2000,
         "flash_frequency": 0.1,
         "ambiance_intensity": 0
     },
@@ -19,10 +19,10 @@
         "height": 480
     },
     "detection": {
-        "canny_threshold1": 157,
-        "gaussian_blur": 5,
-        "roi_width": 400,
-        "roi_height": 400,
+        "canny_threshold1": 149,
+        "gaussian_blur": 21,
+        "roi_width": 800,
+        "roi_height": 800,
         "roi_offset_x": 0,
         "roi_offset_y": 0
     },
@@ -31,8 +31,8 @@
     },
     "ui": {
         "right_split_sizes": [
-            171,
-            1110
+            475,
+            387
         ]
     }
 }

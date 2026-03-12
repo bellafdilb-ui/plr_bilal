@@ -103,19 +103,23 @@ class SerialWorker(QThread):
 
         token = None
 
+        # Token "TEST OK" (handshake µC au boot)
+        if "TEST OK" in buffer:
+            token = "TEST OK"
+
         # Token "OK" (2 caractères, sans terminateur)
-        if "OK" in buffer:
+        elif "OK" in buffer:
             token = "OK"
 
         # Signaux d'examen (1 caractère)
-        for sig in ("D", "F", "f", "A"):
-            if sig in buffer:
-                token = sig
-                break
+        if token is None:
+            for sig in ("D", "F", "f", "A"):
+                if sig in buffer:
+                    token = sig
+                    break
 
         # Version firmware ou autre texte (chercher un motif connu)
         if token is None and "version" in buffer.lower():
-            # Extraire la première occurrence de "version X.XX"
             import re
             m = re.search(r'version\s*[\d.]+', buffer, re.IGNORECASE)
             if m:
@@ -137,7 +141,7 @@ class SerialWorker(QThread):
                 # Vider le buffer d'entrée avant d'envoyer (évite de lire des données anciennes)
                 self.ser.reset_input_buffer()
                 # Le ';' est le terminateur du protocole PLR — pas de \r\n
-                self.ser.write(message.encode('utf-8'))
+                self.ser.write(message.encode('latin-1'))
                 self.data_sent.emit(message)
                 logger.debug(f"TX: {message}")
             except Exception as e:

@@ -42,8 +42,8 @@ def test_settings_dialog_ui(qtbot, tmp_path, mock_db_settings):
     qtbot.addWidget(dlg)
     
     # Modification d'une valeur via l'UI
-    dlg.spin_baseline.setValue(10.0)
-    
+    dlg.spin_flash_delay.setValue(3)
+
     # Vérification que get_settings récupère bien la valeur
     s = dlg.get_settings()
-    assert s['protocol']['baseline_duration'] == 10.0
+    assert s['protocol']['flash_delay_s'] == 3

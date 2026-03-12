@@ -40,10 +40,10 @@ def test_engine_configuration():
     engine = PLRTestEngine(fake_cam)
     
     # On configure avec des valeurs spécifiques
-    engine.configure(baseline_duration=1.0, flash_count=3, 
+    engine.configure(flash_delay=1.0, flash_count=3,
                      flash_duration_ms=500, response_duration=2.0)
-    
-    assert engine.baseline_duration == 1.0
+
+    assert engine.flash_delay == 1.0
     assert engine.flash_count == 3
     assert engine.flash_duration_s == 0.5 # 500ms / 1000
     assert engine.response_duration == 2.0
@@ -72,7 +72,7 @@ def test_run_sequence_logic():
     engine = PLRTestEngine(fake_cam)
     
     # Config très courte pour que le test soit rapide
-    engine.configure(baseline_duration=0.1, flash_count=1, 
+    engine.configure(flash_delay=0.1, flash_count=1,
                      flash_duration_ms=10, response_duration=0.1)
     
     engine.is_running = True
