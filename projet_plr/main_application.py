@@ -42,6 +42,7 @@ from db_manager import DatabaseManager
 from welcome_screen import WelcomeScreen
 from calibration_dialog import CalibrationDialog
 from pdf_generator import PDFGenerator
+from serial_console_window import SerialConsoleWindow
 from styles import apply_modern_theme
 from hardware_manager import HardwareManager
 
@@ -265,9 +266,7 @@ class MainWindow(QMainWindow):
         self.hardware.flash_fired.connect(self.on_hardware_flash_fired)
         self.hardware.flash_ended.connect(self.on_hardware_flash_ended)
         self.hardware.exam_started.connect(self.on_hardware_exam_started)
-        self.hardware.serial_tx.connect(self._log_serial_tx)
-        self.hardware.serial_rx.connect(self._log_serial_rx)
-        self.hardware.serial_raw.connect(self._log_serial_raw)
+        # Les signaux série sont connectés dans SerialConsoleWindow
         
         # Timer pour la reconnexion automatique du matériel
         self.hw_reconnect_timer = QTimer(self)
@@ -315,9 +314,9 @@ class MainWindow(QMainWindow):
 
     def setup_ui(self):
         screen = QApplication.primaryScreen().availableGeometry()
-        win_w = min(1400, int(screen.width() * 0.92))
-        win_h = min(950, int(screen.height() * 0.92))
-        self.resize(win_w, win_h)
+        win_w = screen.width()
+        win_h = screen.height()
+        self.showMaximized()
         central = QWidget(); self.setCentralWidget(central)
         main_lay = QVBoxLayout(central)
         main_lay.setContentsMargins(4, 2, 4, 4)
@@ -337,7 +336,11 @@ class MainWindow(QMainWindow):
         self.lbl_fps_status.setAlignment(Qt.AlignCenter); self.lbl_fps_status.setFixedSize(80, 30)
         self.lbl_fps_status.setStyleSheet("background-color:#e8f5e9; color:#1b5e20; border:2px solid #a5d6a7; border-radius:5px; font-weight:bold; font-size:13px;")
 
-        top_bar.addWidget(self.lbl_cam_status); top_bar.addWidget(self.lbl_hw_status); top_bar.addWidget(self.lbl_fps_status); top_bar.addStretch()
+        self.btn_ir = QPushButton(self.tr("💡 IR : OFF")); self.btn_ir.setFixedSize(120, 30); self.btn_ir.setCheckable(True); self.btn_ir.setChecked(False)
+        self.btn_ir.setStyleSheet("background:#6c757d;color:white;font-weight:bold;border-radius:5px;font-size:13px;")
+        self.btn_ir.clicked.connect(self._on_ir_button_clicked)
+
+        top_bar.addWidget(self.lbl_cam_status); top_bar.addWidget(self.lbl_hw_status); top_bar.addWidget(self.lbl_fps_status); top_bar.addWidget(self.btn_ir); top_bar.addStretch()
         main_lay.addLayout(top_bar)
         
         # --- CONTENU PRINCIPAL ---
@@ -393,46 +396,15 @@ class MainWindow(QMainWindow):
         hl_mac.addWidget(self.combo_macros); hl_mac.addStretch(); self.txt_comments = QTextEdit(); self.txt_comments.setPlaceholderText(self.tr("Observations...")); self.txt_comments.setMaximumHeight(80); vl_com.addLayout(hl_mac); vl_com.addWidget(self.txt_comments); self.grp_com.setLayout(vl_com)
 
         self.grp_hist = QGroupBox(self.tr("Historique")); vl_hist = QVBoxLayout()
-        self.table_hist = QTableWidget(0, 8); self.table_hist.setHorizontalHeaderLabels([self.tr("Date & Heure"),self.tr("Oeil"),self.tr("Stim"),self.tr("Type"),self.tr("Durée"),self.tr("Intensité (%)"), "", ""])
+        self.table_hist = QTableWidget(0, 8); self.table_hist.setHorizontalHeaderLabels([self.tr("Date & Heure"),self.tr("Oeil"),self.tr("Stim"),self.tr("Type"),self.tr("Durée"),self.tr("Intensité (%)"), "", self.tr("Sélection")])
         self.table_hist.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table_hist.setSelectionBehavior(QAbstractItemView.SelectRows); self.table_hist.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table_hist.setSortingEnabled(True); self.table_hist.setContextMenuPolicy(Qt.CustomContextMenu); self.table_hist.customContextMenuRequested.connect(self.show_history_menu); self.table_hist.itemClicked.connect(self.on_history_clicked); vl_hist.addWidget(self.table_hist); self.grp_hist.setLayout(vl_hist)
         
-        # --- CONSOLE SÉRIE DEBUG ---
-        self.grp_serial = QGroupBox(self.tr("Console Série (Debug µC)"))
-        vl_serial = QVBoxLayout()
-        self.serial_console = QTextEdit()
-        self.serial_console.setReadOnly(True)
-        self.serial_console.setMaximumHeight(150)
-        self.serial_console.setStyleSheet("background-color:#1e1e1e; color:#00ff00; font-family:Consolas,monospace; font-size:11px;")
-        self.serial_console.setPlaceholderText(self.tr("Les messages série TX/RX apparaîtront ici..."))
-        hl_serial = QHBoxLayout()
-        self.btn_clear_serial = QPushButton(self.tr("Effacer"))
-        self.btn_clear_serial.setStyleSheet("background:#6c757d;color:white;padding:3px 8px;border-radius:3px;")
-        self.btn_clear_serial.clicked.connect(self.serial_console.clear)
-        self.chk_serial_visible = QPushButton(self.tr("Masquer"))
-        self.chk_serial_visible.setStyleSheet("background:#6c757d;color:white;padding:3px 8px;border-radius:3px;")
-        self.chk_serial_visible.clicked.connect(self._toggle_serial_console)
-        hl_serial.addWidget(self.btn_clear_serial)
-        hl_serial.addWidget(self.chk_serial_visible)
-        hl_serial.addStretch()
-        vl_serial.addLayout(hl_serial)
-        vl_serial.addWidget(self.serial_console)
-        # Champ d'envoi manuel de commandes
-        hl_send = QHBoxLayout()
-        self.txt_serial_cmd = QLineEdit()
-        self.txt_serial_cmd.setPlaceholderText("Ex: !version=0;  ou  !marche IR=1;")
-        self.txt_serial_cmd.setStyleSheet("background:#2d2d2d; color:#fff; font-family:Consolas,monospace; font-size:12px; padding:4px; border:1px solid #555; border-radius:3px;")
-        self.txt_serial_cmd.returnPressed.connect(self._send_manual_serial)
-        self.btn_serial_send = QPushButton(self.tr("Envoyer"))
-        self.btn_serial_send.setStyleSheet("background:#0d6efd;color:white;padding:4px 12px;border-radius:3px;font-weight:bold;")
-        self.btn_serial_send.clicked.connect(self._send_manual_serial)
-        hl_send.addWidget(self.txt_serial_cmd, 1)
-        hl_send.addWidget(self.btn_serial_send)
-        vl_serial.addLayout(hl_send)
-        self.grp_serial.setLayout(vl_serial)
+        # --- CONSOLE SÉRIE (fenêtre séparée, accessible via Réglages) ---
+        self.serial_console_window = SerialConsoleWindow(self.hardware, self)
 
-        bl.addWidget(self.grp_actions); bl.addWidget(self.grp_com); bl.addWidget(self.grp_hist); bl.addWidget(self.grp_serial)
+        bl.addWidget(self.grp_actions); bl.addWidget(self.grp_com); bl.addWidget(self.grp_hist)
         self.right_split = QSplitter(Qt.Vertical)
         self.right_split.setChildrenCollapsible(False)
         bottom_w.setMinimumHeight(200)
@@ -593,6 +565,9 @@ class MainWindow(QMainWindow):
     def on_test_finished(self, meta):
         self.is_test_running = False
         self.hardware.stop_flash()
+        # Éteindre l'IR à chaque fin d'examen (éviter la surchauffe)
+        self.hardware.set_ir(False)
+        self._set_ir_visual(False)
         self.lbl_flash_indicator.setVisible(False)
         self.controls.set_button_running(False)
         self.controls.setEnabled(True)
@@ -728,18 +703,28 @@ class MainWindow(QMainWindow):
 
     def _update_comparison_graph(self):
         curves = []
+        # Couleurs très contrastées : rouge, bleu, vert, violet, orange, cyan, marron, rose
+        _colors = ['#d32f2f', '#1565c0', '#2e7d32', '#7b1fa2', '#ef6c00', '#00838f', '#795548', '#c2185b',
+                    '#f57c00', '#0097a7', '#558b2f', '#6a1b9a', '#d84315', '#00695c', '#4e342e', '#ad1457']
+        # Styles de lignes pour renforcer la distinction visuelle
+        _styles = ['-', '--', '-.', ':']
+        idx = 0
         if self.temp_result_meta and not self.selected_historical_exam:
             an = PLRAnalyzer(); an.load_data(self.temp_result_meta['csv']); an.preprocess()
-            col = '#b71c1c' if self.current_laterality == 'OD' else '#0d47a1'
-            curves.append({'label': self.tr('Actuel'), 'df': an.data, 'metrics': self.temp_result_meta['metrics'], 'color': col})
+            col = _colors[idx % len(_colors)]
+            curves.append({'label': self.tr('Actuel ({lat})').format(lat=self.current_laterality), 'df': an.data, 'metrics': self.temp_result_meta['metrics'], 'color': col, 'style': _styles[idx % len(_styles)]})
+            idx += 1
         for r in range(self.table_hist.rowCount()):
             if self.table_hist.item(r, 7).checkState() == Qt.Checked:
                 ex = self.table_hist.item(r, 7).data(Qt.UserRole)
                 try:
                     an = PLRAnalyzer(); an.load_data(ex['csv_path']); an.preprocess()
-                    lat = ex.get('laterality', '?'); col = '#ff8a80' if lat == 'OD' else '#82b1ff'
+                    lat = ex.get('laterality', '?')
+                    col = _colors[idx % len(_colors)]
+                    style = _styles[idx % len(_styles)]
                     stim = ex.get('results_data', {}).get('flash_color', '?')
-                    curves.append({'label': f"{ex['exam_date'].split(' ')[0]} ({lat}-{stim})", 'df': an.data, 'metrics': ex.get('results_data',{}), 'color': col, 'style':'-'})
+                    curves.append({'label': f"{ex['exam_date'].split(' ')[0]} ({lat}-{stim})", 'df': an.data, 'metrics': ex.get('results_data',{}), 'color': col, 'style': style})
+                    idx += 1
                 except: pass
         self.graph_widget.plot_data(curves, clear=True)
 
@@ -1068,9 +1053,30 @@ class MainWindow(QMainWindow):
         # Mise à jour complète de la configuration hardware
         self._send_all_hardware_params()
 
+    def _on_ir_button_clicked(self):
+        """Bouton IR pressé par l'utilisateur."""
+        on = self.btn_ir.isChecked()
+        self._set_ir_visual(on)
+        self.hardware.set_ir(on)
+
+    def _set_ir_visual(self, on: bool):
+        """Met à jour l'apparence du bouton IR."""
+        self.btn_ir.blockSignals(True)
+        self.btn_ir.setChecked(on)
+        self.btn_ir.blockSignals(False)
+        if on:
+            self.btn_ir.setText(self.tr("💡 IR : ON"))
+            self.btn_ir.setStyleSheet("background:#ff5722;color:white;font-weight:bold;border-radius:5px;font-size:13px;")
+        else:
+            self.btn_ir.setText(self.tr("💡 IR : OFF"))
+            self.btn_ir.setStyleSheet("background:#6c757d;color:white;font-weight:bold;border-radius:5px;font-size:13px;")
+
     def _send_initial_hardware_config(self):
         """Envoie la configuration par defaut au µC apres le handshake 'TEST OK'."""
         self._send_all_hardware_params()
+        # Synchroniser l'état IR du bouton
+        if self.btn_ir.isChecked():
+            self.hardware.set_ir(True)
 
     def _send_all_hardware_params(self):
         """Envoie TOUS les parametres au µC (connexion initiale / depart examen)."""
@@ -1100,38 +1106,11 @@ class MainWindow(QMainWindow):
     def _calib(self): (CalibrationDialog(self.camera_thread.camera, self).exec() if self.camera_thread else None)
     def return_to_home(self): self.stop_camera(); self.w=WelcomeScreen(); self.w.patient_selected.connect(lambda p:[self.w.close(), MainWindow(p).show()]); self.w.show(); self.close()
     def _show_about(self): QMessageBox.about(self, "Infos", "PLR V3.28")
-    def _log_serial_tx(self, msg: str):
-        ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        self.serial_console.append(f'<span style="color:#ff9800;">[{ts}] TX → {msg}</span>')
-        self.serial_console.verticalScrollBar().setValue(self.serial_console.verticalScrollBar().maximum())
-
-    def _log_serial_rx(self, msg: str):
-        ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        self.serial_console.append(f'<span style="color:#4caf50;">[{ts}] RX ← {msg}</span>')
-        self.serial_console.verticalScrollBar().setValue(self.serial_console.verticalScrollBar().maximum())
-
-    def _log_serial_raw(self, msg: str):
-        ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        self.serial_console.append(f'<span style="color:#888888;">[{ts}] RAW {msg}</span>')
-        self.serial_console.verticalScrollBar().setValue(self.serial_console.verticalScrollBar().maximum())
-
-    def _send_manual_serial(self):
-        """Envoie une commande saisie manuellement dans la console série."""
-        cmd = self.txt_serial_cmd.text().strip()
-        if not cmd:
-            return
-        if not self.hardware.is_connected or not self.hardware.worker:
-            ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            self.serial_console.append(f'<span style="color:#f44336;">[{ts}] ERREUR : Non connecté</span>')
-            return
-        # Envoyer directement (bypass la queue pour le debug)
-        self.hardware.worker.send(cmd)
-        self.txt_serial_cmd.clear()
-
-    def _toggle_serial_console(self):
-        visible = self.serial_console.isVisible()
-        self.serial_console.setVisible(not visible)
-        self.chk_serial_visible.setText(self.tr("Afficher") if visible else self.tr("Masquer"))
+    def _open_serial_console(self):
+        """Ouvre ou affiche la fenêtre console série."""
+        self.serial_console_window.show()
+        self.serial_console_window.raise_()
+        self.serial_console_window.activateWindow()
 
     def stop_camera(self): (self.camera_thread.stop() if self.camera_thread else None)
     def closeEvent(self, e):

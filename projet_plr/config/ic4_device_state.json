@@ -1,0 +1,14 @@
+{
+  "AcquisitionFrameRate": 30.0,
+  "Contrast": 0,
+  "Denoise": 0,
+  "Gamma": 1.0,
+  "Height": 480,
+  "Sharpness": 0,
+  "SoftwareTransformEnable": true,
+  "ToneMappingAuto": true,
+  "ToneMappingEnable": false,
+  "ToneMappingGlobalBrightness": 0.0,
+  "ToneMappingIntensity": 1.0,
+  "Width": 744
+}

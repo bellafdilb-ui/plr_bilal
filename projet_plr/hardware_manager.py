@@ -218,12 +218,14 @@ class HardwareManager(QObject):
             self.enqueue_command(self._fmt("depart=1234"))
 
     def stop_flash(self):
-        """Arrête immédiatement le flash et vide la file d'attente."""
+        """Arrête immédiatement le flash et vide la file d'attente.
+        Passe par la file pour que les commandes suivantes attendent le OK."""
         if self.is_connected and self.worker:
             logger.info(">>> HARDWARE : ARRET FLASH <<<")
             self.timeout_timer.stop()
             self.command_queue = []
-            self.worker.send(self._fmt("arret pwm=0"))
+            self._waiting_ok = False
+            self.enqueue_command(self._fmt("arret pwm=0"))
 
     def set_ir(self, on: bool):
         """Allume ou éteint l'éclairage IR (via la file d'attente)."""
@@ -308,7 +310,6 @@ class HardwareManager(QObject):
             self._exam_in_progress = False
             logger.info("Signal µC : Fin du flash")
             self.flash_ended.emit()
-            self.set_ir(True)
 
         # Détection de la version firmware
         if "version" in data.lower() or (len(data) > 3 and data not in ("OK", "D", "f", "F", "A")):

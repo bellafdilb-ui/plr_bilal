@@ -14,12 +14,12 @@
         "ambiance_intensity": 0
     },
     "camera": {
-        "index": 1,
+        "index": 0,
         "width": 640,
         "height": 480
     },
     "detection": {
-        "canny_threshold1": 149,
+        "canny_threshold1": 148,
         "gaussian_blur": 21,
         "roi_width": 800,
         "roi_height": 800,
@@ -31,8 +31,8 @@
     },
     "ui": {
         "right_split_sizes": [
-            475,
-            387
+            626,
+            409
         ]
     }
 }

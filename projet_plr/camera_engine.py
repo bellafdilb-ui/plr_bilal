@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 import time
 import os
+import json
 import logging
 from typing import Optional, Tuple, Dict, Any
 from settings_dialog import ConfigManager
@@ -29,8 +30,10 @@ try:
 
     import imagingcontrol4 as ic4
     _IC4_AVAILABLE = True
-except ImportError:
-    pass
+except ImportError as e:
+    print(f"[CAMERA] IC4 import failed: {e}")
+except Exception as e:
+    print(f"[CAMERA] IC4 init error: {e}")
 
 class CameraEngine:
     """
@@ -95,10 +98,47 @@ class CameraEngine:
                     dev = devs[min(self.camera_index, len(devs) - 1)]
                     self._ic4_grabber = ic4.Grabber()
                     self._ic4_grabber.device_open(dev)
-
-                    # Appliquer le FPS cible avant de demarrer le stream
-                    target_fps = self.config_manager.config.get("camera", {}).get("target_fps", 30)
                     m = self._ic4_grabber.device_property_map
+
+                    # Restaurer les propriétés sauvegardées AVANT le stream
+                    # (Width/Height ne sont modifiables que hors streaming)
+                    self._restore_ic4_properties()
+
+                    # Forcer la résolution maximale du capteur
+                    try:
+                        # Désactiver OffsetAutoCenter pour pouvoir manipuler offsets/résolution
+                        try:
+                            m.find("OffsetAutoCenter").value = "Off"
+                        except Exception:
+                            pass
+                        # Reset des offsets pour permettre la résolution max
+                        try:
+                            m.set_value(ic4.PropId.OFFSET_X, 0)
+                            m.set_value(ic4.PropId.OFFSET_Y, 0)
+                        except Exception:
+                            pass
+                        pw = m.find(ic4.PropId.WIDTH)
+                        ph = m.find(ic4.PropId.HEIGHT)
+                        pw.value = pw.maximum
+                        ph.value = ph.maximum
+                        print(f"[CAMERA] IC4 : résolution capteur max {pw.value}x{ph.value}")
+                        # Sauvegarder l'état avec la bonne résolution
+                        self.save_ic4_properties()
+                    except Exception as e:
+                        print(f"[CAMERA] IC4 : impossible de forcer résolution max ({e})")
+
+                    # Limiter l'exposure auto pour ne pas plafonner le FPS
+                    target_fps = self.config_manager.config.get("camera", {}).get("target_fps", 30)
+                    max_exposure_us = (1_000_000.0 / target_fps) - 1000  # marge de 1ms
+                    try:
+                        p_exp_limit = m.find("ExposureAutoUpperLimit")
+                        if p_exp_limit.value > max_exposure_us:
+                            p_exp_limit.value = max_exposure_us
+                            print(f"[CAMERA] IC4 : ExposureAutoUpperLimit plafonné à {max_exposure_us:.0f} µs (pour {target_fps} fps)")
+                    except Exception as e:
+                        print(f"[CAMERA] IC4 : impossible de limiter exposure auto ({e})")
+
+                    # Appliquer le FPS cible
                     try:
                         m.set_value_float(ic4.PropId.ACQUISITION_FRAME_RATE, float(target_fps))
                     except Exception as e:
@@ -172,6 +212,9 @@ class CameraEngine:
     def release(self):
         """Libère les ressources (caméra et fichier CSV)."""
         self.stop_recording()
+        # Sauvegarder les propriétés IC4 avant de fermer
+        if self._use_ic4 and self._ic4_grabber:
+            self.save_ic4_properties()
         if self._use_ic4:
             try:
                 if self._ic4_grabber:
@@ -206,6 +249,86 @@ class CameraEngine:
     def set_display_mode(self, mode: str):
         """Change le mode d'affichage ('normal', 'roi', 'binary', 'mosaic')."""
         self.display_mode = mode
+
+    # --- Propriétés IC4 (exposition, gain, brightness, contrast) ---
+
+    def get_ic4_properties(self) -> dict:
+        """Lit les propriétés actuelles de la caméra IC4."""
+        props = {}
+        if not self._use_ic4 or not self._ic4_grabber:
+            return props
+        try:
+            m = self._ic4_grabber.device_property_map
+            for name in ["BlackLevel", "Contrast", "Gain", "ExposureTime",
+                         "GainAuto", "ExposureAuto", "Gamma"]:
+                try:
+                    p = m.find(name)
+                    pt = type(p).__name__
+                    if "Float" in pt:
+                        props[name] = {"value": p.value, "min": p.minimum, "max": p.maximum, "type": "float"}
+                    elif "Int" in pt:
+                        props[name] = {"value": p.value, "min": p.minimum, "max": p.maximum, "type": "int"}
+                    elif "Enum" in pt:
+                        props[name] = {"value": p.value, "entries": [e.name for e in p.entries if e.is_available], "type": "enum"}
+                    elif "Bool" in pt:
+                        props[name] = {"value": p.value, "type": "bool"}
+                except Exception as e:
+                    print(f"[CAMERA] IC4 prop {name} read error: {e}")
+        except Exception as e:
+            print(f"[CAMERA] IC4 get_properties error: {e}")
+        return props
+
+    def set_ic4_property(self, name: str, value):
+        """Modifie une propriété IC4 à chaud."""
+        if not self._use_ic4 or not self._ic4_grabber:
+            return False
+        try:
+            m = self._ic4_grabber.device_property_map
+            p = m.find(name)
+            pt = type(p).__name__
+            if "Float" in pt:
+                p.value = float(value)
+            elif "Int" in pt:
+                p.value = int(value)
+            elif "Bool" in pt:
+                p.value = bool(value)
+            elif "Enum" in pt:
+                p.value = str(value)
+            print(f"[CAMERA] IC4 {name} = {value}")
+            self.save_ic4_properties()
+            return True
+        except Exception as e:
+            print(f"[CAMERA] IC4 set {name} failed: {e}")
+            return False
+
+    # --- Sauvegarde / Restauration des propriétés IC4 (sérialisation native) ---
+
+    _IC4_STATE_FILE = os.path.join(os.path.dirname(__file__), "config", "ic4_device_state.json")
+
+    def save_ic4_properties(self):
+        """Sauvegarde TOUTES les propriétés de la caméra IC4 via la sérialisation native."""
+        if not self._use_ic4 or not self._ic4_grabber:
+            return
+        try:
+            os.makedirs(os.path.dirname(self._IC4_STATE_FILE), exist_ok=True)
+            m = self._ic4_grabber.device_property_map
+            m.serialize_to_file(self._IC4_STATE_FILE)
+            print(f"[CAMERA] IC4 : état complet sauvegardé → {self._IC4_STATE_FILE}")
+        except Exception as e:
+            print(f"[CAMERA] IC4 : erreur sauvegarde état ({e})")
+
+    def _restore_ic4_properties(self):
+        """Restaure TOUTES les propriétés IC4 depuis le fichier d'état natif."""
+        if not os.path.exists(self._IC4_STATE_FILE):
+            print("[CAMERA] IC4 : aucun état sauvegardé — sauvegarde de l'état initial.")
+            self.save_ic4_properties()
+            return
+        try:
+            m = self._ic4_grabber.device_property_map
+            m.deserialize_from_file(self._IC4_STATE_FILE)
+            print(f"[CAMERA] IC4 : état restauré depuis {self._IC4_STATE_FILE}")
+        except Exception as e:
+            print(f"[CAMERA] IC4 : erreur restauration état ({e})")
 
     def set_fps_target(self, fps: int):
         """Change le FPS. IC4 : changement a chaud. OpenCV : memorise pour prochain open."""

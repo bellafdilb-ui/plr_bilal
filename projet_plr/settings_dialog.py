@@ -8,8 +8,9 @@ import json
 from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QTabWidget, QWidget,
-    QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QGroupBox, 
-    QLineEdit, QFileDialog, QListWidget, QMessageBox, QComboBox, QCheckBox
+    QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QGroupBox,
+    QLineEdit, QFileDialog, QListWidget, QMessageBox, QComboBox, QCheckBox,
+    QSlider
 )
 from PySide6.QtCore import Qt, Signal
 from db_manager import DatabaseManager
@@ -65,6 +66,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self._tab_detection(), self.tr("🎯 Détection"))
         self.tabs.addTab(self._tab_clinic(), self.tr("🏥 Clinique"))
         self.tabs.addTab(self._tab_macros(), self.tr("📝 Macros"))
+        self.tabs.addTab(self._tab_debug(), self.tr("🔧 Debug"))
         layout.addWidget(self.tabs)
         btns = QHBoxLayout()
         btn_apply = QPushButton(self.tr("Appliquer")); btn_apply.clicked.connect(self.apply_settings)
@@ -116,8 +118,208 @@ class SettingsDialog(QDialog):
         g.setLayout(fl); l.addWidget(g); return w
 
     def _tab_camera(self):
-        w = QWidget(); l = QFormLayout(w); self.spin_idx = QSpinBox()
-        l.addRow(self.tr("Index:"), self.spin_idx); return w
+        w = QWidget(); layout = QVBoxLayout(w)
+
+        # --- Index caméra ---
+        grp_general = QGroupBox(self.tr("Général")); fl = QFormLayout()
+        self.spin_idx = QSpinBox()
+        fl.addRow(self.tr("Index:"), self.spin_idx)
+        grp_general.setLayout(fl); layout.addWidget(grp_general)
+
+        # --- Réglages IC4 (The Imaging Source) ---
+        self.grp_ic4 = QGroupBox(self.tr("Réglages Caméra IC4 (The Imaging Source)"))
+        self.ic4_layout = QFormLayout()
+
+        self._ic4_sliders = {}
+        self._ic4_autos = {}
+
+        # Brightness (= BlackLevel dans IC4)
+        self.sl_brightness = QSlider(Qt.Horizontal); self.lbl_brightness = QLabel("--")
+        self.sl_brightness.valueChanged.connect(lambda v: self._on_ic4_slider_float("BlackLevel", v))
+        self._ic4_sliders["BlackLevel"] = (self.sl_brightness, self.lbl_brightness)
+        hl = QHBoxLayout(); hl.addWidget(self.sl_brightness, 1); hl.addWidget(self.lbl_brightness)
+        self.ic4_layout.addRow(self.tr("Brightness:"), hl)
+
+        # Contrast
+        self.sl_contrast = QSlider(Qt.Horizontal); self.lbl_contrast = QLabel("--")
+        self.sl_contrast.valueChanged.connect(lambda v: self._on_ic4_slider("Contrast", v))
+        self._ic4_sliders["Contrast"] = (self.sl_contrast, self.lbl_contrast)
+        hl = QHBoxLayout(); hl.addWidget(self.sl_contrast, 1); hl.addWidget(self.lbl_contrast)
+        self.ic4_layout.addRow(self.tr("Contrast:"), hl)
+
+        # Gain + Auto
+        self.sl_gain = QSlider(Qt.Horizontal); self.lbl_gain = QLabel("--")
+        self.chk_gain_auto = QCheckBox(self.tr("Auto"))
+        self.sl_gain.valueChanged.connect(lambda v: self._on_ic4_slider_float("Gain", v))
+        self.chk_gain_auto.toggled.connect(lambda c: self._on_ic4_auto("GainAuto", c))
+        self._ic4_sliders["Gain"] = (self.sl_gain, self.lbl_gain)
+        self._ic4_autos["GainAuto"] = self.chk_gain_auto
+        hl = QHBoxLayout(); hl.addWidget(self.sl_gain, 1); hl.addWidget(self.lbl_gain); hl.addWidget(self.chk_gain_auto)
+        self.ic4_layout.addRow(self.tr("Gain:"), hl)
+
+        # Exposure + Auto
+        self.sl_exposure = QSlider(Qt.Horizontal); self.lbl_exposure = QLabel("--")
+        self.chk_exposure_auto = QCheckBox(self.tr("Auto"))
+        self.sl_exposure.valueChanged.connect(lambda v: self._on_ic4_slider_float("ExposureTime", v))
+        self.chk_exposure_auto.toggled.connect(lambda c: self._on_ic4_auto("ExposureAuto", c))
+        self._ic4_sliders["ExposureTime"] = (self.sl_exposure, self.lbl_exposure)
+        self._ic4_autos["ExposureAuto"] = self.chk_exposure_auto
+        hl = QHBoxLayout(); hl.addWidget(self.sl_exposure, 1); hl.addWidget(self.lbl_exposure); hl.addWidget(self.chk_exposure_auto)
+        self.ic4_layout.addRow(self.tr("Exposure:"), hl)
+
+        # Gamma
+        self.sl_gamma = QSlider(Qt.Horizontal); self.lbl_gamma = QLabel("--")
+        self.sl_gamma.valueChanged.connect(lambda v: self._on_ic4_slider_float("Gamma", v))
+        self._ic4_sliders["Gamma"] = (self.sl_gamma, self.lbl_gamma)
+        hl = QHBoxLayout(); hl.addWidget(self.sl_gamma, 1); hl.addWidget(self.lbl_gamma)
+        self.ic4_layout.addRow(self.tr("Gamma:"), hl)
+
+        # Bouton refresh
+        self.btn_ic4_refresh = QPushButton(self.tr("Lire les valeurs caméra"))
+        self.btn_ic4_refresh.clicked.connect(self._refresh_ic4_properties)
+        self.ic4_layout.addRow(self.btn_ic4_refresh)
+
+        self.lbl_ic4_status = QLabel(self.tr("Cliquez sur 'Lire les valeurs caméra' pour charger les réglages."))
+        self.lbl_ic4_status.setStyleSheet("color: gray; font-style: italic;")
+        self.ic4_layout.addRow(self.lbl_ic4_status)
+
+        self.grp_ic4.setLayout(self.ic4_layout)
+        layout.addWidget(self.grp_ic4)
+        layout.addStretch()
+        return w
+
+    def _get_camera_engine(self):
+        """Récupère le CameraEngine depuis la fenêtre principale."""
+        main_win = self.parent()
+        if main_win and hasattr(main_win, 'camera_thread') and main_win.camera_thread:
+            return main_win.camera_thread.camera
+        return None
+
+    def _refresh_ic4_properties(self):
+        """Lit les propriétés IC4 depuis la caméra et met à jour les sliders."""
+        cam = self._get_camera_engine()
+        # Debug : comprendre pourquoi la caméra n'est pas trouvée
+        main_win = self.parent()
+        print(f"[IC4-DEBUG] parent={type(main_win).__name__}, "
+              f"has camera_thread={hasattr(main_win, 'camera_thread')}, "
+              f"camera_thread={getattr(main_win, 'camera_thread', None)}, "
+              f"cam={cam}, "
+              f"use_ic4={cam._use_ic4 if cam else 'N/A'}")
+        if not cam or not cam._use_ic4:
+            self.lbl_ic4_status.setText(self.tr("Caméra IC4 non disponible (OpenCV ou déconnectée)."))
+            self.lbl_ic4_status.setStyleSheet("color: #f44336; font-style: italic;")
+            return
+
+        props = cam.get_ic4_properties()
+        if not props:
+            self.lbl_ic4_status.setText(self.tr("Impossible de lire les propriétés."))
+            self.lbl_ic4_status.setStyleSheet("color: #f44336; font-style: italic;")
+            return
+
+        # BlackLevel (float, affiché comme "Brightness")
+        if "BlackLevel" in props:
+            p = props["BlackLevel"]
+            sl, lbl = self._ic4_sliders["BlackLevel"]
+            sl.blockSignals(True)
+            sl.setRange(int(p["min"]), int(p["max"]))
+            sl.setValue(int(p["value"]))
+            lbl.setText(str(int(p["value"])))
+            sl.blockSignals(False)
+
+        # Contrast (integer)
+        if "Contrast" in props:
+            p = props["Contrast"]
+            sl, lbl = self._ic4_sliders["Contrast"]
+            sl.blockSignals(True)
+            sl.setRange(int(p["min"]), int(p["max"]))
+            sl.setValue(int(p["value"]))
+            lbl.setText(str(int(p["value"])))
+            sl.blockSignals(False)
+
+        # Gain (float, slider en centièmes pour la précision)
+        if "Gain" in props:
+            p = props["Gain"]
+            sl, lbl = self._ic4_sliders["Gain"]
+            sl.blockSignals(True)
+            sl.setRange(int(p["min"] * 100), int(p["max"] * 100))
+            sl.setValue(int(p["value"] * 100))
+            lbl.setText(f"{p['value']:.2f} dB")
+            sl.blockSignals(False)
+
+        if "GainAuto" in props:
+            chk = self._ic4_autos["GainAuto"]
+            chk.blockSignals(True)
+            chk.setChecked(props["GainAuto"]["value"] == "Continuous")
+            chk.blockSignals(False)
+
+        # Exposure (float µs)
+        if "ExposureTime" in props:
+            p = props["ExposureTime"]
+            sl, lbl = self._ic4_sliders["ExposureTime"]
+            sl.blockSignals(True)
+            sl.setRange(int(p["min"]), min(int(p["max"]), 250000))
+            sl.setValue(int(p["value"]))
+            exp_us = p["value"]
+            if exp_us > 1000:
+                lbl.setText(f"1/{int(1000000/exp_us)}")
+            else:
+                lbl.setText(f"{exp_us:.0f} µs")
+            sl.blockSignals(False)
+
+        if "ExposureAuto" in props:
+            chk = self._ic4_autos["ExposureAuto"]
+            chk.blockSignals(True)
+            chk.setChecked(props["ExposureAuto"]["value"] == "Continuous")
+            chk.blockSignals(False)
+
+        # Gamma (float, slider en centièmes)
+        if "Gamma" in props:
+            p = props["Gamma"]
+            sl, lbl = self._ic4_sliders["Gamma"]
+            sl.blockSignals(True)
+            sl.setRange(int(p["min"] * 100), int(p["max"] * 100))
+            sl.setValue(int(p["value"] * 100))
+            lbl.setText(f"{p['value']:.2f}")
+            sl.blockSignals(False)
+
+        self.lbl_ic4_status.setText(self.tr("Propriétés chargées avec succès."))
+        self.lbl_ic4_status.setStyleSheet("color: #4caf50; font-style: italic;")
+
+    def _on_ic4_slider(self, prop_name, value):
+        """Applique une propriété entière IC4 en temps réel."""
+        cam = self._get_camera_engine()
+        if cam:
+            cam.set_ic4_property(prop_name, value)
+        sl, lbl = self._ic4_sliders[prop_name]
+        lbl.setText(str(value))
+
+    def _on_ic4_slider_float(self, prop_name, value):
+        """Applique une propriété flottante IC4."""
+        cam = self._get_camera_engine()
+        sl, lbl = self._ic4_sliders[prop_name]
+        if prop_name == "Gain":
+            real_val = value / 100.0
+            if cam: cam.set_ic4_property(prop_name, real_val)
+            lbl.setText(f"{real_val:.2f} dB")
+        elif prop_name == "Gamma":
+            real_val = value / 100.0
+            if cam: cam.set_ic4_property(prop_name, real_val)
+            lbl.setText(f"{real_val:.2f}")
+        elif prop_name == "ExposureTime":
+            if cam: cam.set_ic4_property(prop_name, float(value))
+            if value > 1000:
+                lbl.setText(f"1/{int(1000000/value)}")
+            else:
+                lbl.setText(f"{value} µs")
+        elif prop_name == "BlackLevel":
+            if cam: cam.set_ic4_property(prop_name, float(value))
+            lbl.setText(str(value))
+
+    def _on_ic4_auto(self, prop_name, checked):
+        """Active/désactive un mode Auto IC4 (Gain ou Exposure)."""
+        cam = self._get_camera_engine()
+        if cam:
+            cam.set_ic4_property(prop_name, "Continuous" if checked else "Off")
 
     def _tab_detection(self):
         w = QWidget(); l = QFormLayout(w)
@@ -139,6 +341,26 @@ class SettingsDialog(QDialog):
         h.addWidget(self.ic); h.addWidget(b); self.lm = QListWidget()
         bd = QPushButton(self.tr("Supprimer Sélection")); bd.clicked.connect(self._del_macro)
         l.addLayout(h); l.addWidget(self.lm); l.addWidget(bd); self._refresh_macros(); return w
+
+    def _tab_debug(self):
+        w = QWidget(); l = QVBoxLayout(w)
+        grp = QGroupBox(self.tr("Communication Série"))
+        vl = QVBoxLayout()
+        lbl = QLabel(self.tr("Ouvre la console de debug pour visualiser les échanges série avec le microcontrôleur."))
+        lbl.setWordWrap(True)
+        self.btn_open_serial = QPushButton(self.tr("Console Série (Debug µC)"))
+        self.btn_open_serial.setStyleSheet("background:#1e1e1e;color:#00ff00;padding:10px 16px;border-radius:3px;font-family:Consolas,monospace;font-weight:bold;border:1px solid #555;font-size:14px;")
+        self.btn_open_serial.clicked.connect(self._open_serial_console)
+        vl.addWidget(lbl); vl.addWidget(self.btn_open_serial)
+        grp.setLayout(vl); l.addWidget(grp); l.addStretch()
+        return w
+
+    def _open_serial_console(self):
+        main_win = self.parent()
+        if hasattr(main_win, 'serial_console_window'):
+            main_win.serial_console_window.show()
+            main_win.serial_console_window.raise_()
+            main_win.serial_console_window.activateWindow()
 
     def _refresh_macros(self):
         self.lm.clear()
