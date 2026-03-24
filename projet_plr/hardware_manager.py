@@ -37,6 +37,7 @@ class HardwareManager(QObject):
         super().__init__()
         self.is_connected = False
         self._handshake_done = False  # True quand "TEST OK" reçu du µC
+        self.camera_fps = 30.0  # FPS courant de la caméra (mis à jour par MainWindow)
         self._exam_in_progress = False  # True entre D/F et A (examen µC en cours)
         self.worker = None
         self.command_queue = []
@@ -233,12 +234,40 @@ class HardwareManager(QObject):
             cmd = self._fmt("marche IR=1") if on else self._fmt("arret IR=0")
             self.enqueue_command(cmd)
 
+    def _ir_blackout_one_frame(self):
+        """Coupe l'IR pendant ~1 frame pour créer un marqueur optique T0.
+        Envoi DIRECT (bypass file d'attente) pour minimiser la latence.
+        La caméra capte naturellement une frame noire, utilisée ensuite
+        par detect_t0_from_black_frame() pour déterminer le T0 exact."""
+        if not self.worker or not self.worker.running:
+            return
+        # Coupure IR immédiate (envoi direct, pas de queue)
+        self.worker.send(self._fmt("arret IR=0"))
+        # Durée = 1 frame (adapté au FPS courant)
+        fps = max(self.camera_fps, 15.0)
+        blackout_ms = int(1000.0 / fps)
+        logger.info(f"[SYNC] IR coupé — blackout {blackout_ms}ms (@ {fps:.0f}fps)")
+        QTimer.singleShot(blackout_ms, self._ir_restore)
+
+    def _ir_restore(self):
+        """Rétablit l'éclairage IR après le blackout d'1 frame."""
+        if self.worker and self.worker.running:
+            self.worker.send(self._fmt("marche IR=1"))
+            logger.info("[SYNC] IR restauré")
+
     def set_pupil_position(self, x: int, y: int):
-        """Envoie les coordonnées de la pupille au dispositif."""
-        if self.is_connected and self.worker:
-            x_str = str(min(max(x, 0), 999)).zfill(3)
-            y_str = str(min(max(y, 0), 999)).zfill(3)
-            self.worker.send(self._fmt(f"axe xy={x_str}{y_str}"))
+        """Envoie les coordonnées de la pupille au dispositif.
+        Limité à ~5 envois/seconde pour ne pas saturer le port série
+        et ne pas vider le buffer d'entrée (préserve les signaux D/F/f/A)."""
+        if not self.is_connected or not self.worker:
+            return
+        now = time.time()
+        if now - getattr(self, '_last_coord_time', 0) < 0.2:
+            return
+        self._last_coord_time = now
+        x_str = str(min(max(x, 0), 999)).zfill(3)
+        y_str = str(min(max(y, 0), 999)).zfill(3)
+        self.worker.send(self._fmt(f"axe xy={x_str}{y_str}"), flush_input=False)
 
     def request_firmware_version(self):
         """Demande la version du firmware au dispositif."""
@@ -298,12 +327,14 @@ class HardwareManager(QObject):
         elif data == "F":
             self._exam_in_progress = True
             logger.info("Signal µC : Flash déclenché (sans retard / gâchette)")
+            self._ir_blackout_one_frame()
             self.flash_fired.emit()
 
         elif data == "f":
             # Le µC a déclenché le flash APRÈS le retard configuré.
             # Précédé par un "D".
             logger.info("Signal µC : Flash déclenché (après retard)")
+            self._ir_blackout_one_frame()
             self.flash_fired.emit()
 
         elif data == "A":

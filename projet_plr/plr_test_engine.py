@@ -64,7 +64,9 @@ class PLRTestEngine(QObject):
     def notify_flash_fired(self):
         """
         Appelé par MainWindow quand le µC envoie F ou f.
-        Capture le timestamp précis et débloque la séquence.
+        Capture le timestamp série (fallback) et débloque la séquence.
+        Le T0 réel est déterminé à l'analyse via la black frame hardware
+        (coupure IR d'1 frame déclenchée par HardwareManager).
         """
         if self.is_running and self.camera and self.camera.recording:
             self._flash_timestamp = time.time() - self.camera.start_time

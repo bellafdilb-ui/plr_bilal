@@ -134,13 +134,13 @@ class SerialWorker(QThread):
 
         return buffer
 
-    def send(self, message: str):
-        """Envoie un message au module (Thread-safe). Format PLR : !commande;"""
+    def send(self, message: str, flush_input: bool = True):
+        """Envoie un message au module (Thread-safe). Format PLR : !commande;
+        flush_input: si False, ne vide pas le buffer d'entrée (pour les envois fréquents)."""
         if self.ser and self.ser.is_open:
             try:
-                # Vider le buffer d'entrée avant d'envoyer (évite de lire des données anciennes)
-                self.ser.reset_input_buffer()
-                # Le ';' est le terminateur du protocole PLR — pas de \r\n
+                if flush_input:
+                    self.ser.reset_input_buffer()
                 self.ser.write(message.encode('latin-1'))
                 self.data_sent.emit(message)
                 logger.debug(f"TX: {message}")

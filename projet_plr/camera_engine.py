@@ -102,47 +102,53 @@ class CameraEngine:
 
                     # Restaurer les propriétés sauvegardées AVANT le stream
                     # (Width/Height ne sont modifiables que hors streaming)
+                    _had_saved_state = os.path.exists(self._IC4_STATE_FILE)
                     self._restore_ic4_properties()
 
-                    # Forcer la résolution maximale du capteur
-                    try:
-                        # Désactiver OffsetAutoCenter pour pouvoir manipuler offsets/résolution
+                    if not _had_saved_state:
+                        # Première utilisation : forcer la résolution maximale du capteur
                         try:
-                            m.find("OffsetAutoCenter").value = "Off"
+                            try:
+                                m.find("OffsetAutoCenter").value = "Off"
+                            except Exception:
+                                pass
+                            try:
+                                m.set_value(ic4.PropId.OFFSET_X, 0)
+                                m.set_value(ic4.PropId.OFFSET_Y, 0)
+                            except Exception:
+                                pass
+                            pw = m.find(ic4.PropId.WIDTH)
+                            ph = m.find(ic4.PropId.HEIGHT)
+                            pw.value = pw.maximum
+                            ph.value = ph.maximum
+                            print(f"[CAMERA] IC4 : résolution capteur max {pw.value}x{ph.value}")
+                            self.save_ic4_properties()
+                        except Exception as e:
+                            print(f"[CAMERA] IC4 : impossible de forcer résolution max ({e})")
+                    else:
+                        try:
+                            pw = m.find(ic4.PropId.WIDTH)
+                            ph = m.find(ic4.PropId.HEIGHT)
+                            print(f"[CAMERA] IC4 : résolution restaurée {pw.value}x{ph.value}")
                         except Exception:
                             pass
-                        # Reset des offsets pour permettre la résolution max
+
+                    if not _had_saved_state:
+                        # Première utilisation : appliquer FPS cible et limiter exposure
+                        target_fps = self.config_manager.config.get("camera", {}).get("target_fps", 30)
+                        max_exposure_us = (1_000_000.0 / target_fps) - 1000
                         try:
-                            m.set_value(ic4.PropId.OFFSET_X, 0)
-                            m.set_value(ic4.PropId.OFFSET_Y, 0)
-                        except Exception:
-                            pass
-                        pw = m.find(ic4.PropId.WIDTH)
-                        ph = m.find(ic4.PropId.HEIGHT)
-                        pw.value = pw.maximum
-                        ph.value = ph.maximum
-                        print(f"[CAMERA] IC4 : résolution capteur max {pw.value}x{ph.value}")
-                        # Sauvegarder l'état avec la bonne résolution
-                        self.save_ic4_properties()
-                    except Exception as e:
-                        print(f"[CAMERA] IC4 : impossible de forcer résolution max ({e})")
-
-                    # Limiter l'exposure auto pour ne pas plafonner le FPS
-                    target_fps = self.config_manager.config.get("camera", {}).get("target_fps", 30)
-                    max_exposure_us = (1_000_000.0 / target_fps) - 1000  # marge de 1ms
-                    try:
-                        p_exp_limit = m.find("ExposureAutoUpperLimit")
-                        if p_exp_limit.value > max_exposure_us:
-                            p_exp_limit.value = max_exposure_us
-                            print(f"[CAMERA] IC4 : ExposureAutoUpperLimit plafonné à {max_exposure_us:.0f} µs (pour {target_fps} fps)")
-                    except Exception as e:
-                        print(f"[CAMERA] IC4 : impossible de limiter exposure auto ({e})")
-
-                    # Appliquer le FPS cible
-                    try:
-                        m.set_value_float(ic4.PropId.ACQUISITION_FRAME_RATE, float(target_fps))
-                    except Exception as e:
-                        print(f"[CAMERA] IC4 : impossible de regler FPS a {target_fps} ({e})")
+                            p_exp_limit = m.find("ExposureAutoUpperLimit")
+                            if p_exp_limit.value > max_exposure_us:
+                                p_exp_limit.value = max_exposure_us
+                                print(f"[CAMERA] IC4 : ExposureAutoUpperLimit plafonné à {max_exposure_us:.0f} µs (pour {target_fps} fps)")
+                        except Exception as e:
+                            print(f"[CAMERA] IC4 : impossible de limiter exposure auto ({e})")
+                        try:
+                            p_fps = m.find(ic4.PropId.ACQUISITION_FRAME_RATE)
+                            p_fps.value = float(target_fps)
+                        except Exception as e:
+                            print(f"[CAMERA] IC4 : impossible de regler FPS a {target_fps} ({e})")
 
                     self._ic4_sink = ic4.SnapSink()
                     self._ic4_grabber.stream_setup(self._ic4_sink)
@@ -150,7 +156,7 @@ class CameraEngine:
                     self._frame_width = m.get_value_int(ic4.PropId.WIDTH)
                     self._frame_height = m.get_value_int(ic4.PropId.HEIGHT)
                     try:
-                        rf = m.get_value_float(ic4.PropId.ACQUISITION_FRAME_RATE)
+                        rf = m.find(ic4.PropId.ACQUISITION_FRAME_RATE).value
                     except Exception:
                         rf = 15.0
 
@@ -325,8 +331,77 @@ class CameraEngine:
             return
         try:
             m = self._ic4_grabber.device_property_map
-            m.deserialize_from_file(self._IC4_STATE_FILE)
-            print(f"[CAMERA] IC4 : état restauré depuis {self._IC4_STATE_FILE}")
+
+            # --- Lire les valeurs cibles depuis le fichier JSON ---
+            with open(self._IC4_STATE_FILE, 'r') as f:
+                saved = json.load(f)
+            saved_w = saved.get("Width")
+            saved_h = saved.get("Height")
+            saved_offset_auto = saved.get("OffsetAutoCenter", "Off")
+            saved_ox = saved.get("OffsetX", 0) if isinstance(saved.get("OffsetX"), int) else 0
+            saved_oy = saved.get("OffsetY", 0) if isinstance(saved.get("OffsetY"), int) else 0
+            print(f"[CAMERA] IC4 restore : cible W={saved_w} H={saved_h} "
+                  f"OffsetAutoCenter={saved_offset_auto} OX={saved_ox} OY={saved_oy}")
+
+            # --- Étape 1 : Pré-conditionner (ordre critique pour la caméra IC) ---
+            # Désactiver OffsetAutoCenter
+            try:
+                m.find("OffsetAutoCenter").value = "Off"
+            except Exception:
+                pass
+            # Offsets à 0 (libère la contrainte sur Width/Height)
+            try:
+                m.set_value(ic4.PropId.OFFSET_X, 0)
+                m.set_value(ic4.PropId.OFFSET_Y, 0)
+            except Exception:
+                pass
+            # Width/Height au max (libère la contrainte sur les offsets cibles)
+            try:
+                pw = m.find(ic4.PropId.WIDTH)
+                ph = m.find(ic4.PropId.HEIGHT)
+                pw.value = pw.maximum
+                ph.value = ph.maximum
+            except Exception:
+                pass
+
+            # --- Étape 2 : Tenter le deserialize natif ---
+            try:
+                m.deserialize_from_file(self._IC4_STATE_FILE)
+            except Exception as e:
+                print(f"[CAMERA] IC4 : deserialize_from_file warning ({e})")
+
+            # --- Étape 3 : Vérifier et forcer les propriétés critiques ---
+            # Le deserialize peut échouer silencieusement sur certaines props
+            try:
+                cur_w = m.find(ic4.PropId.WIDTH).value
+                cur_h = m.find(ic4.PropId.HEIGHT).value
+                if saved_w and cur_w != saved_w:
+                    print(f"[CAMERA] IC4 : Width {cur_w} != cible {saved_w}, correction manuelle...")
+                    m.find(ic4.PropId.WIDTH).value = saved_w
+                if saved_h and cur_h != saved_h:
+                    print(f"[CAMERA] IC4 : Height {cur_h} != cible {saved_h}, correction manuelle...")
+                    m.find(ic4.PropId.HEIGHT).value = saved_h
+            except Exception as e:
+                print(f"[CAMERA] IC4 : correction Width/Height échouée ({e})")
+
+            # Restaurer OffsetAutoCenter et offsets après Width/Height
+            try:
+                if saved_offset_auto != "Off":
+                    m.find("OffsetAutoCenter").value = saved_offset_auto
+                else:
+                    m.set_value(ic4.PropId.OFFSET_X, saved_ox)
+                    m.set_value(ic4.PropId.OFFSET_Y, saved_oy)
+            except Exception as e:
+                print(f"[CAMERA] IC4 : correction offsets échouée ({e})")
+
+            # --- Log final : état effectif ---
+            try:
+                eff_w = m.find(ic4.PropId.WIDTH).value
+                eff_h = m.find(ic4.PropId.HEIGHT).value
+                print(f"[CAMERA] IC4 : état restauré — effectif {eff_w}x{eff_h}")
+            except Exception:
+                pass
+
         except Exception as e:
             print(f"[CAMERA] IC4 : erreur restauration état ({e})")
 
@@ -336,9 +411,27 @@ class CameraEngine:
         if self._use_ic4 and self._ic4_grabber:
             try:
                 m = self._ic4_grabber.device_property_map
-                m.set_value_float(ic4.PropId.ACQUISITION_FRAME_RATE, float(fps))
-                rf = m.get_value_float(ic4.PropId.ACQUISITION_FRAME_RATE)
-                print(f"[CAMERA] IC4 FPS change a {rf:.0f}")
+                # Ajuster l'ExposureAutoUpperLimit AVANT de changer le FPS
+                # sinon l'exposure trop longue empêche d'atteindre le FPS cible
+                if fps > 0:
+                    max_exposure_us = (1_000_000.0 / fps) - 1000
+                    try:
+                        p_exp_limit = m.find("ExposureAutoUpperLimit")
+                        p_exp_limit.value = max_exposure_us
+                        print(f"[CAMERA] IC4 : ExposureAutoUpperLimit → {max_exposure_us:.0f} µs (pour {fps} fps)")
+                    except Exception as e:
+                        print(f"[CAMERA] IC4 : impossible de limiter exposure ({e})")
+                # Lire le FPS max supporté à la résolution actuelle
+                try:
+                    p_fps = m.find(ic4.PropId.ACQUISITION_FRAME_RATE)
+                    print(f"[CAMERA] IC4 : FPS range à cette résolution = {p_fps.minimum:.1f} - {p_fps.maximum:.1f}")
+                except Exception:
+                    pass
+                p_fps = m.find(ic4.PropId.ACQUISITION_FRAME_RATE)
+                target = float(fps) if fps > 0 else p_fps.maximum
+                p_fps.value = target
+                rf = p_fps.value
+                print(f"[CAMERA] IC4 FPS changé à {rf:.0f}")
             except Exception as e:
                 print(f"[CAMERA] IC4 : impossible de changer FPS a chaud ({e})")
 
@@ -444,9 +537,9 @@ class CameraEngine:
                 vis_frame = raw_frame.copy()
                 gray_frame = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2GRAY)
 
-            # --- DETECTION BLACK FRAME (SYNCHRO) ---
+            # --- DETECTION BLACK FRAME (SYNCHRO FLASH → T0) ---
             avg_brightness = np.mean(gray_frame)
-            is_black_frame = avg_brightness < 10.0 # Seuil de détection du "trou noir" (Black Frame hardware)
+            is_black_frame = avg_brightness < 40.0
 
             # 2. ROI CROP
             h, w = vis_frame.shape[:2]
@@ -505,7 +598,9 @@ class CameraEngine:
                         'diameter_px': radius * 2,
                         'diameter_mm': diameter_mm,
                         'quality_score': 100,
-                        'brightness': avg_brightness
+                        'brightness': avg_brightness,
+                        'center_x': int(cx) + x1,  # Coordonnée absolue dans l'image
+                        'center_y': int(cy) + y1,
                     }
                     
                     cv2.circle(roi_vis, center, int(radius), (0, 255, 0), 2)

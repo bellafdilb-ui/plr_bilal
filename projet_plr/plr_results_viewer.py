@@ -164,6 +164,28 @@ class PLRGraphWidget(QWidget):
                 if i==0: 
                     yl=self.axes.get_ylim(); self.axes.text(ft, yl[1]-(yl[1]-yl[0])*0.05, "FLASH", color='#e65100', fontsize=8, rotation=90, verticalalignment='top')
 
+        # --- ÉCHELLE : marges confortables pour lisibilité ---
+        if self.current_data_list:
+            all_t, all_y = [], []
+            for item in self.current_data_list:
+                df = item.get('df')
+                if df is None or df.empty: continue
+                all_t.extend(df['timestamp_s'].dropna().tolist())
+                col = 'diameter_smooth' if self.display_mode == 'smooth' else 'diameter_mm'
+                all_y.extend(df.get(col, df['diameter_mm']).dropna().tolist())
+            if all_t and all_y:
+                t_min, t_max = min(all_t), max(all_t)
+                y_min, y_max = min(all_y), max(all_y)
+                # Axe X : marge de 0.5s de chaque côté, ticks entiers
+                self.axes.set_xlim(t_min - 0.5, t_max + 0.5)
+                from matplotlib.ticker import MultipleLocator
+                self.axes.xaxis.set_major_locator(MultipleLocator(1.0))
+                self.axes.xaxis.set_minor_locator(MultipleLocator(0.5))
+                # Axe Y : marge de 1mm au-dessus et en-dessous (atténue les micro-variations)
+                self.axes.set_ylim(y_min - 1.0, y_max + 1.0)
+                self.axes.yaxis.set_major_locator(MultipleLocator(1.0))
+                self.axes.yaxis.set_minor_locator(MultipleLocator(0.5))
+
         handles, labels = self.axes.get_legend_handles_labels()
         if labels:
             unique = [(h, l) for i, (h, l) in enumerate(zip(handles, labels)) if l not in labels[:i]]
@@ -432,15 +454,34 @@ class VideoPlayerWidget(QWidget):
 
     def _find_black_frame(self):
         """Recherche la premiere frame sombre : coupure IR = instant du flash."""
-        if self.mode != "images" or not self.image_files:
+        if self.mode == "images" and self.image_files:
+            for i, path in enumerate(self.image_files):
+                gray = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+                if gray is not None and np.mean(gray) < 15:
+                    self.lbl_black_status.setText(f"Frame noire : #{i + 1}")
+                    self.slider.setValue(i)
+                    return
+        elif self.mode == "video" and self.cap and self.cap.isOpened():
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            min_brightness = 999.0
+            min_idx = -1
+            for i in range(self.total_frames):
+                ret, frame = self.cap.read()
+                if not ret:
+                    break
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
+                avg = np.mean(gray)
+                if avg < min_brightness:
+                    min_brightness = avg
+                    min_idx = i
+            print(f"[BLACK FRAME] Luminosité min = {min_brightness:.1f} à frame #{min_idx + 1}")
+            if min_brightness < 40:
+                self.lbl_black_status.setText(f"Frame noire : #{min_idx + 1} (lum={min_brightness:.0f})")
+                self.slider.setValue(min_idx)
+                return
+        else:
             self.lbl_black_status.setText("Non disponible")
             return
-        for i, path in enumerate(self.image_files):
-            gray = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-            if gray is not None and np.mean(gray) < 15:
-                self.lbl_black_status.setText(f"Frame noire : #{i + 1}")
-                self.slider.setValue(i)
-                return
         self.lbl_black_status.setText("Aucune frame noire trouvee")
 
     def keyPressEvent(self, event):

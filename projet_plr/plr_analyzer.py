@@ -214,25 +214,24 @@ class PLRAnalyzer:
             return {}
 
     def detect_t0_from_black_frame(self) -> Optional[float]:
-        """Détecte le T0 précis grâce au marqueur 'Black Frame' (chute luminosité)."""
+        """Détecte le T0 précis grâce au marqueur 'Black Frame' (coupure IR hardware).
+
+        Quand le µC envoie F/f, le HardwareManager coupe l'IR pendant ~1 frame.
+        La caméra capte naturellement une (ou deux) frames noires.
+        T0 = timestamp de la première frame noire = moment du flash."""
         if self.data is None or 'brightness' not in self.data.columns: return None
-        
-        # Seuil ajustable (ici 10.0, assez bas pour ne pas confondre avec un clignement)
-        THRESHOLD_BLACK = 10.0
-        
-        # On cherche les frames où la luminosité chute
+
+        THRESHOLD_BLACK = 40.0
+
         black_indices = self.data.index[self.data['brightness'] < THRESHOLD_BLACK].tolist()
         if not black_indices: return None
-        
-        # Stratégie : Le T0 est la dernière frame noire avant le retour de la lumière (Flash)
-        # C'est souvent plus précis que la première frame noire
-        last_black_idx = black_indices[-1]
-        
-        if last_black_idx + 1 < len(self.data):
-            # On retourne le timestamp de la frame qui suit immédiatement le noir (Le Flash)
-            return self.data.iloc[last_black_idx + 1]['timestamp_s']
-            
-        return None
+
+        # T0 = première frame noire (moment le plus proche de la coupure IR = flash)
+        first_black_idx = black_indices[0]
+        t0 = self.data.loc[first_black_idx, 'timestamp_s']
+        logger.info(f"[SYNC] Black frame T0 détectée à {t0:.3f}s "
+                    f"({len(black_indices)} frame(s) noire(s))")
+        return t0
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

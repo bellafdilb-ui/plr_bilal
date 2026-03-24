@@ -1,14 +1,39 @@
 {
   "AcquisitionFrameRate": 30.0,
-  "Contrast": 0,
+  "AutoFunctionsROIEnable": true,
+  "AutoFunctionsROIPreset": "AutoFunctionsROIPreset_Center50Pct",
+  "BlackLevel": 127.0,
+  "Contrast": -47,
   "Denoise": 0,
+  "ExposureAuto": "Off",
+  "ExposureAutoHighlightReduction": false,
+  "ExposureAutoReference": 142,
+  "ExposureTime": 1935.0,
+  "GPOut": 0,
+  "Gain": 0.0,
+  "GainAuto": "Off",
   "Gamma": 1.0,
   "Height": 480,
+  "OffsetAutoCenter": "Off",
+  "PixelFormat": "Mono8",
+  "ReverseX": false,
+  "ReverseY": false,
   "Sharpness": 0,
   "SoftwareTransformEnable": true,
+  "StrobeEnable": "Off",
+  "StrobeOperation": "Exposure",
+  "StrobePolarity": "ActiveLow",
   "ToneMappingAuto": true,
   "ToneMappingEnable": false,
   "ToneMappingGlobalBrightness": 0.0,
   "ToneMappingIntensity": 1.0,
+  "TriggerSelector": {
+    "(Value)": "FrameStart",
+    "FrameStart": {
+      "TriggerActivation": "FallingEdge",
+      "TriggerDelay": 1455.9,
+      "TriggerMode": "Off"
+    }
+  },
   "Width": 744
 }

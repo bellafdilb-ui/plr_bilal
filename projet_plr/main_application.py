@@ -158,13 +158,18 @@ class ControlPanel(QWidget):
     def __init__(self): super().__init__(); self.setup_ui()
     def setup_ui(self):
         l=QVBoxLayout(self); l.setSpacing(10)
-        
+
+        # BOUTON LANCER + BARRE DE PROGRESSION (en haut)
+        self.bt=QPushButton(self.tr("▶ LANCER EXAMEN")); self.bt.setFixedHeight(45); self.bt.setStyleSheet("background:#28a745;color:white;font-weight:bold;border-radius:5px;"); self.bt.clicked.connect(self.test_requested.emit)
+        self.pb=QProgressBar(); self.pb.setAlignment(Qt.AlignCenter); self.pb.setValue(0); self.pb.setStyleSheet("QProgressBar{border:1px solid #999;border-radius:5px;text-align:center;} QProgressBar::chunk{background-color:#28a745;}")
+        l.addWidget(self.bt); l.addWidget(self.pb)
+
         # CHOIX OEIL
         ge=QGroupBox(self.tr("Choix de l'Œil")); he=QHBoxLayout(); self.eg=QButtonGroup(self)
         self.rod=QRadioButton(self.tr("OD (Droit)")); self.rod.setStyleSheet("color:#d32f2f;font-weight:bold;"); self.rod.setChecked(True)
         self.rog=QRadioButton(self.tr("OG (Gauche)")); self.rog.setStyleSheet("color:#1976d2;font-weight:bold;")
         self.eg.addButton(self.rod); self.eg.addButton(self.rog); he.addWidget(self.rod); he.addWidget(self.rog); ge.setLayout(he); l.addWidget(ge)
-        
+
         # CHOIX COULEUR FLASH
         gc=QGroupBox(self.tr("Stimulus Chromatique")); hc=QHBoxLayout(); self.cg=QButtonGroup(self)
         self.rc_blue = QRadioButton(self.tr("Bleu")); self.rc_blue.setStyleSheet("color:#007bff; font-weight:bold;")
@@ -189,29 +194,17 @@ class ControlPanel(QWidget):
         self.st=QSlider(Qt.Horizontal); self.st.setRange(0,255); self.st.setValue(50); self.st.valueChanged.connect(self.threshold_changed.emit)
         self.sb=QSlider(Qt.Horizontal); self.sb.setRange(1,21); self.sb.setValue(5); self.sb.valueChanged.connect(self.blur_changed.emit)
         self.cm=QComboBox(); self.cm.addItems(["Normal","ROI","Binaire","Mosaïque"]); self.cm.currentTextChanged.connect(lambda t:self._on_mode(t))
-        # Sélecteur FPS
-        self.fps_grp = QButtonGroup(self)
-        self.rb_15fps = QRadioButton("15 fps")
-        self.rb_30fps = QRadioButton("30 fps"); self.rb_30fps.setChecked(True)
-        self.rb_40fps = QRadioButton("40 fps")
-        self.rb_60fps = QRadioButton("60 fps")
-        self.rb_max  = QRadioButton("Max")
-        for rb in (self.rb_15fps, self.rb_30fps, self.rb_40fps, self.rb_60fps, self.rb_max):
-            self.fps_grp.addButton(rb)
-        hfps1 = QHBoxLayout(); hfps1.addWidget(self.rb_15fps); hfps1.addWidget(self.rb_30fps); hfps1.addWidget(self.rb_40fps)
-        hfps2 = QHBoxLayout(); hfps2.addWidget(self.rb_60fps); hfps2.addWidget(self.rb_max)
-        vfps = QVBoxLayout(); vfps.setSpacing(2); vfps.addLayout(hfps1); vfps.addLayout(hfps2)
-        wfps = QWidget(); wfps.setLayout(vfps)
-        self.fps_grp.buttonClicked.connect(lambda: self.fps_changed.emit(self._get_fps_value()))
-        fl.addWidget(QLabel(self.tr("Seuil"))); fl.addWidget(self.st); fl.addWidget(QLabel(self.tr("Flou"))); fl.addWidget(self.sb); fl.addWidget(QLabel(self.tr("Vue"))); fl.addWidget(self.cm); fl.addWidget(QLabel(self.tr("FPS"))); fl.addWidget(wfps); gs.setLayout(fl); l.addWidget(gs)
-        
-        # BOUTON LANCER
-        self.bt=QPushButton(self.tr("▶ LANCER EXAMEN")); self.bt.setFixedHeight(45); self.bt.setStyleSheet("background:#28a745;color:white;font-weight:bold;border-radius:5px;"); self.bt.clicked.connect(self.test_requested.emit)
-        
-        self.pb=QProgressBar(); self.pb.setAlignment(Qt.AlignCenter); self.pb.setValue(0); self.pb.setStyleSheet("QProgressBar{border:1px solid #999;border-radius:5px;text-align:center;} QProgressBar::chunk{background-color:#28a745;}")
+        # Sélecteur FPS (liste déroulante)
+        self.fps_combo = QComboBox()
+        self.fps_combo.addItems(["15 fps", "30 fps", "40 fps", "60 fps", "Max"])
+        self.fps_combo.setCurrentIndex(1)  # 30 fps par défaut
+        self.fps_combo.currentIndexChanged.connect(lambda: self.fps_changed.emit(self._get_fps_value()))
+        fl.addWidget(QLabel(self.tr("Seuil"))); fl.addWidget(self.st); fl.addWidget(QLabel(self.tr("Flou"))); fl.addWidget(self.sb); fl.addWidget(QLabel(self.tr("Vue"))); fl.addWidget(self.cm); fl.addWidget(QLabel(self.tr("FPS"))); fl.addWidget(self.fps_combo); gs.setLayout(fl); l.addWidget(gs)
+
+        # REINITIALISATION
         self.br=QPushButton(self.tr("🔄 Réinit. Caméra")); self.br.setStyleSheet("background:#e67e22;color:white;padding:5px;border-radius:4px;"); self.br.clicked.connect(self.reset_camera_requested.emit)
         self.bh=QPushButton(self.tr("🔌 Réinit. Matériel")); self.bh.setStyleSheet("background:#6c757d;color:white;padding:5px;border-radius:4px;"); self.bh.clicked.connect(self.reset_hardware_requested.emit)
-        l.addWidget(self.bt); l.addWidget(self.pb); l.addWidget(self.br); l.addWidget(self.bh); l.addStretch()
+        l.addWidget(self.br); l.addWidget(self.bh); l.addStretch()
         
     def _on_mode(self, t: str): 
         mode = "normal"
@@ -226,11 +219,8 @@ class ControlPanel(QWidget):
     def set_intensity_percent(self, v): self.slider_intensity.setValue(v)
 
     def _get_fps_value(self) -> int:
-        if self.rb_15fps.isChecked(): return 15
-        if self.rb_30fps.isChecked(): return 30
-        if self.rb_40fps.isChecked(): return 40
-        if self.rb_60fps.isChecked(): return 60
-        return 0  # Max = 0 (pas de limite)
+        fps_map = {0: 15, 1: 30, 2: 40, 3: 60, 4: 0}  # 0 = Max (pas de limite)
+        return fps_map.get(self.fps_combo.currentIndex(), 30)
 
     def get_selected_eye(self) -> str: return "OD" if self.rod.isChecked() else "OG"
     
@@ -536,6 +526,17 @@ class MainWindow(QMainWindow):
         if self.is_test_running:
             return
 
+        # Résultat non traité → ignorer la gâchette (pas d'enregistrement)
+        if self.temp_result_meta is not None:
+            # Afficher le warning une seule fois par séquence gâchette (D puis F/f)
+            if not getattr(self, '_trigger_warned', False):
+                self._trigger_warned = True
+                logging.info("Gâchette ignorée : résultat précédent non sauvegardé/écarté")
+                QMessageBox.warning(self, self.tr("Gâchette ignorée"),
+                                    self.tr("Un examen non sauvegardé est en attente.\n\n"
+                                            "Sauvegardez ou écartez le résultat avant de relancer un examen."))
+            return
+
         self._trigger_initiated = True  # Gâchette → ne pas envoyer !depart au µC
         if self.conf.get("general", "enable_beep", True):
             QApplication.beep()
@@ -758,9 +759,33 @@ class MainWindow(QMainWindow):
         self.camera_thread.error_occurred.connect(self.on_camera_error)
         self.camera_thread.camera_started.connect(self.init_engine)
         self.camera_thread.fps_updated.connect(lambda fps: self.lbl_fps_status.setText(f"{fps:.0f} FPS"))
+        self.camera_thread.pupil_detected.connect(self._send_pupil_coords)
         self.camera_thread.start()
 
     def on_camera_started(self): self.is_camera_ready = True; self.set_camera_status(True); self.check_ready_state()
+
+    def _send_pupil_coords(self, pupil_data: dict):
+        """Envoie les coordonnées de la pupille au µC pour l'affichage sur l'écran du dispositif.
+        Le centre de l'image caméra correspond au centre de l'écran µC (500, 500).
+        L'écart en pixels est converti proportionnellement sur la plage 0-999."""
+        if not self.is_hardware_ready or not self.camera_thread or not self.camera_thread.camera:
+            return
+        if self.is_test_running:
+            return
+        if pupil_data.get('quality_score', 0) == 0:
+            return
+        cx = pupil_data.get('center_x', 0)
+        cy = pupil_data.get('center_y', 0)
+        cam = self.camera_thread.camera
+        # Résolution caméra IC4 : 1440x1080 (ou selon config capteur)
+        # Résolution écran µC (TFT) : 128x160 pixels
+        # Mapping proportionnel : pixel caméra → pixel écran µC
+        screen_w, screen_h = 128, 160
+        x_mapped = int(cx / cam._frame_width * screen_w)
+        y_mapped = int(cy / cam._frame_height * screen_h)
+        x_mapped = max(0, min(screen_w - 1, x_mapped))
+        y_mapped = max(0, min(screen_h - 1, y_mapped))
+        self.hardware.set_pupil_position(x_mapped, y_mapped)
     def on_camera_error(self, err_msg): self.is_camera_ready = False; self.set_camera_status(False); self.check_ready_state(); self.status.showMessage(self.tr("⚠️ Erreur Caméra")); QMessageBox.critical(self, self.tr("Erreur Caméra"), self.tr("Problème détecté :\n\n{err}\n\n👉 Vérifiez le branchement USB.\n👉 Cliquez ensuite sur '🔄 Réinit. Caméra'.").format(err=err_msg))
     
     def _close_hw_warning(self):
@@ -841,6 +866,8 @@ class MainWindow(QMainWindow):
             # OpenCV ne supporte pas le changement a chaud → reset necessaire
             if not self.camera_thread.camera._use_ic4 and fps != 15:
                 self.reset_camera()
+        # Adapter la durée de coupure IR au FPS courant
+        self.hardware.camera_fps = float(fps) if fps > 0 else 90.0
 
     def reset_camera(self): self.status.showMessage(self.tr("Reset...")); self.is_camera_ready = False; self.set_camera_status(False); self.check_ready_state(); self.stop_camera(); QTimer.singleShot(1000, self.start_camera)
     
@@ -997,7 +1024,8 @@ class MainWindow(QMainWindow):
             d.exec()
 
     def save_new_exam(self):
-        if self.temp_result_meta: 
+        self._trigger_warned = False
+        if self.temp_result_meta:
             vid = self.temp_result_meta.get('video_path', '')
             self.db.save_exam(self.patient['id'], self.current_laterality, self.temp_result_meta['csv'], vid=vid, results=self.temp_result_meta['metrics'], comments=self.txt_comments.toPlainText())
             self._set_ui_state("IDLE"); self.load_patient_history(); self.status.showMessage(self.tr("Sauvegardé."))
@@ -1006,6 +1034,7 @@ class MainWindow(QMainWindow):
             new = self.txt_comments.toPlainText(); eid = self.selected_historical_exam['id']
             if self.db.update_exam_comment(eid, new): self.load_patient_history(); self.status.showMessage(self.tr("Mis à jour.")); self.selected_historical_exam['comments'] = new
     def discard_exam(self):
+        self._trigger_warned = False
         if self.temp_result_meta:
             for key in ('csv', 'video_path'):
                 try: os.remove(self.temp_result_meta[key])
