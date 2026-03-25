@@ -82,9 +82,15 @@ class CameraEngine:
         self.open_camera()
         self.load_config()
 
-    def open_camera(self):
-        """Tente d'ouvrir la caméra : IC4 (USB3 Vision) puis fallback OpenCV."""
-        print(f"[CAMERA] Ouverture index {self.camera_index}...")
+    def open_camera(self, _retry_count: int = 0, max_retries: int = 3, retry_delay: float = 2.0):
+        """Tente d'ouvrir la caméra : IC4 (USB3 Vision) puis fallback OpenCV.
+
+        Réessaie automatiquement si aucune caméra n'est trouvée (utile au boot).
+        """
+        if _retry_count > 0:
+            print(f"[CAMERA] Tentative {_retry_count + 1}/{max_retries + 1} (attente drivers)...")
+        else:
+            print(f"[CAMERA] Ouverture index {self.camera_index}...")
 
         # --- 1. Tentative IC4 (The Imaging Source USB3 Vision) ---
         if _IC4_AVAILABLE:
@@ -117,6 +123,14 @@ class CameraEngine:
                                 m.set_value(ic4.PropId.OFFSET_Y, 0)
                             except Exception:
                                 pass
+                            # Désactiver binning/decimation (évite l'effet "zoom")
+                            for bprop in ("BinningHorizontal", "BinningVertical",
+                                          "DecimationHorizontal", "DecimationVertical"):
+                                try:
+                                    p = m.find(bprop)
+                                    p.value = p.minimum
+                                except Exception:
+                                    pass
                             pw = m.find(ic4.PropId.WIDTH)
                             ph = m.find(ic4.PropId.HEIGHT)
                             pw.value = pw.maximum
@@ -181,7 +195,13 @@ class CameraEngine:
             print(f"[CAMERA] OpenCV : echec {name}...")
 
         if not self.cap or not self.cap.isOpened():
-            print(f"[CAMERA] ERREUR FATALE : Aucune camera trouvee.")
+            if _retry_count < max_retries:
+                print(f"[CAMERA] Aucune camera trouvee — nouvel essai dans {retry_delay:.0f}s...")
+                time.sleep(retry_delay)
+                self.cap = None
+                self.open_camera(_retry_count=_retry_count + 1, max_retries=max_retries, retry_delay=retry_delay)
+                return
+            print(f"[CAMERA] ERREUR FATALE : Aucune camera trouvee apres {max_retries + 1} tentatives.")
             return
 
         try:
@@ -355,6 +375,15 @@ class CameraEngine:
                 m.set_value(ic4.PropId.OFFSET_Y, 0)
             except Exception:
                 pass
+            # Désactiver binning/decimation AVANT de toucher Width/Height
+            # (sinon le max Width/Height est réduit → effet "zoom")
+            for bprop in ("BinningHorizontal", "BinningVertical",
+                          "DecimationHorizontal", "DecimationVertical"):
+                try:
+                    p = m.find(bprop)
+                    p.value = p.minimum
+                except Exception:
+                    pass
             # Width/Height au max (libère la contrainte sur les offsets cibles)
             try:
                 pw = m.find(ic4.PropId.WIDTH)

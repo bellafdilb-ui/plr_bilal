@@ -141,6 +141,7 @@ class HardwareManager(QObject):
         self._handshake_timer.stop()
         if self.is_connected:
             self.stop_flash()
+            self.set_ir(False)
             time.sleep(0.1)
 
         if self.worker:
@@ -258,8 +259,13 @@ class HardwareManager(QObject):
     def set_pupil_position(self, x: int, y: int):
         """Envoie les coordonnées de la pupille au dispositif.
         Limité à ~5 envois/seconde pour ne pas saturer le port série
-        et ne pas vider le buffer d'entrée (préserve les signaux D/F/f/A)."""
+        et ne pas vider le buffer d'entrée (préserve les signaux D/F/f/A).
+        Suspendu pendant un examen et quand la file de commandes est active
+        pour éviter les collisions série (flood OK → reset µC)."""
         if not self.is_connected or not self.worker:
+            return
+        # Ne pas envoyer pendant un examen ou si la file de commandes est active
+        if self._exam_in_progress or self._waiting_ok or self.command_queue:
             return
         now = time.time()
         if now - getattr(self, '_last_coord_time', 0) < 0.2:

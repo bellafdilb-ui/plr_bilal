@@ -1103,9 +1103,10 @@ class MainWindow(QMainWindow):
     def _send_initial_hardware_config(self):
         """Envoie la configuration par defaut au µC apres le handshake 'TEST OK'."""
         self._send_all_hardware_params()
-        # Synchroniser l'état IR du bouton
-        if self.btn_ir.isChecked():
-            self.hardware.set_ir(True)
+        # Synchroniser l'état IR avec le bouton (forcer OFF si bouton décoché)
+        ir_on = self.btn_ir.isChecked()
+        self.hardware.set_ir(ir_on)
+        self._set_ir_visual(ir_on)
 
     def _send_all_hardware_params(self):
         """Envoie TOUS les parametres au µC (connexion initiale / depart examen)."""
